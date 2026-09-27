@@ -2,10 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ApplyResult,
   BackupInfo,
+  FetchedModels,
   ImportResult,
   ModelInfo,
+  ProbeResult,
   Profile,
   ProfileInput,
+  ProviderImportResult,
+  ProviderInfo,
+  ProviderInput,
+  ProvidersResult,
   Status,
   SwitchPreview,
 } from "./types";
@@ -30,6 +36,15 @@ export const api = {
   listModels: (refresh: boolean) => invoke<ModelInfo[]>("list_models", { refresh }),
   listBackups: () => invoke<BackupInfo[]>("list_backups"),
   restoreBackup: (path: string) => invoke<ApplyResult>("restore_backup", { path }),
+  listProviders: () => invoke<ProvidersResult>("list_providers"),
+  saveProvider: (input: ProviderInput) => invoke<ProviderInfo>("save_provider", { input }),
+  deleteProvider: (id: string) => invoke<void>("delete_provider", { id }),
+  setProviderEnabled: (id: string, enabled: boolean) => invoke<ProviderInfo>("set_provider_enabled", { id, enabled }),
+  setProviderKey: (id: string, key: string) => invoke<ProviderInfo>("set_provider_key", { id, key }),
+  clearProviderKey: (id: string) => invoke<ProviderInfo>("clear_provider_key", { id }),
+  testProvider: (id: string) => invoke<ProbeResult>("test_provider", { id }),
+  fetchProviderModels: (id: string) => invoke<FetchedModels>("fetch_provider_models", { id }),
+  importProvidersFromOpencode: () => invoke<ProviderImportResult>("import_providers_from_opencode"),
 } as const;
 
 export type Api = typeof api;

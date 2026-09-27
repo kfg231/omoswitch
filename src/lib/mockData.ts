@@ -1,7 +1,7 @@
 import { KNOWN_AGENTS, KNOWN_CATEGORIES } from "./catalog";
-import type { ModelInfo, Profile } from "./types";
+import type { ModelInfo, Profile, ProviderInfo } from "./types";
 
-const PROVIDERS = ["openai", "anthropic", "google", "xai", "deepseek", "mistral"] as const;
+const PROVIDERS = ["openai", "anthropic", "google", "xai", "deepseek", "wawazz-gpt"] as const;
 const MODEL_NAMES = [
   "gpt-6-sol",
   "gpt-6-mini",
@@ -42,7 +42,7 @@ function buildProfile(id: string, name: string, note: string, primary: string, l
     agents[agent] = assignment(
       primary,
       index % 3 === 0 ? level : "medium",
-      index === 0 ? ["anthropic/claude-sonnet-5"] : undefined,
+      index === 0 ? ["wawazz-gpt/gpt-6-astra"] : undefined,
     );
   }
   const categories: Record<string, Record<string, unknown>> = {};
@@ -76,5 +76,51 @@ export function seedProfiles(): Profile[] {
       "openai/gpt-6-mini",
       "low",
     ),
+  ];
+}
+
+export function seedProviders(): ProviderInfo[] {
+  return [
+    {
+      id: "deepseek",
+      name: "DeepSeek",
+      baseUrl: "https://api.deepseek.com/v1",
+      api: "openai-completions",
+      models: [
+        { id: "deepseek-chat", name: "DeepSeek Chat", reasoning: false, contextWindow: 64000, maxTokens: 8192 },
+        { id: "deepseek-coder", name: "DeepSeek Coder", reasoning: false, contextWindow: 64000, maxTokens: 8192 },
+      ],
+      enabled: true,
+      hasKey: true,
+      keySource: "auth",
+      inlineKey: false,
+      knownToOmo: true,
+    },
+    {
+      id: "openrouter",
+      name: "OpenRouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      api: "openai-completions",
+      models: [{ id: "auto", name: "Auto (best available)", reasoning: false }],
+      enabled: false,
+      hasKey: false,
+      keySource: "none",
+      inlineKey: false,
+      knownToOmo: false,
+    },
+    {
+      id: "ollama",
+      name: "Ollama",
+      baseUrl: "http://localhost:11434/v1",
+      api: "openai-completions",
+      models: [
+        { id: "llama3.3", name: "Llama 3.3", reasoning: false, contextWindow: 131072, maxTokens: 8192 },
+      ],
+      enabled: true,
+      hasKey: false,
+      keySource: "none",
+      inlineKey: false,
+      knownToOmo: false,
+    },
   ];
 }

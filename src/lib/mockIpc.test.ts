@@ -123,4 +123,147 @@ describe("mock IPC backend", () => {
     expect(restored.changed).toBe(true);
     await expect(api.restoreBackup("C:\\nope")).rejects.toMatchObject({ kind: "io" });
   });
+
+  it("lists providers with 3 seeds and includes agentDir in status", async () => {
+    const result = await api.listProviders();
+    expect(result.providers).toHaveLength(3);
+    expect(result.agentDir).toContain(".omo");
+    expect(result.modelsJsonPath).toContain("models.json");
+    const status = await api.getStatus();
+    expect(status.providerCount).toBe(3);
+    expect(status.modelsJsonPresent).toBe(true);
+  });
+
+  it("saves a new provider and updates an existing one", async () => {
+    const created = await api.saveProvider({
+      id: "test-provider",
+      name: "Test",
+      baseUrl: "https://example.com/v1",
+      api: "openai-completions",
+      models: [{ id: "test-model" }],
+      inlineKey: false,
+    });
+    expect(created.id).toBe("test-provider");
+    expect(created.enabled).toBe(true);
+    expect((await api.listProviders()).providers).toHaveLength(4);
+    const updated = await api.saveProvider({
+      ...created,
+      name: "Updated",
+      models: [{ id: "new-model" }],
+    });
+    expect(updated.name).toBe("Updated");
+    expect((await api.listProviders()).providers).toHaveLength(4);
+  });
+
+  it("rejects invalid provider inputs", async () => {
+    await expect(
+      api.saveProvider({
+        id: "Bad_ID",
+        name: "Bad",
+        baseUrl: "https://example.com",
+        api: "openai-completions",
+        models: [],
+        inlineKey: false,
+      }),
+    ).rejects.toMatchObject({ kind: "invalidProvider", field: "id" });
+    await expect(
+      api.saveProvider({
+        id: "good-id",
+        name: "Bad URL",
+        baseUrl: "not-a-url",
+        api: "openai-completions",
+        models: [],
+        inlineKey: false,
+      }),
+    ).rejects.toMatchObject({ kind: "invalidProvider", field: "baseUrl" });
+    await expect(
+      api.saveProvider({
+        id: "good-id",
+        name: "Bad API",
+        baseUrl: "https://example.com",
+        api: "invalid-api" as never,
+        models: [],
+        inlineKey: false,
+      }),
+    ).rejects.toMatchObject({ kind: "invalidProvider", field: "api" });
+  });
+
+  it("deletes a provider and rejects unknown id", async () => {
+    const before = (await api.listProviders()).providers.length;
+    const [first] = (await api.listProviders()).providers;
+    await api.deleteProvider(first!.id);
+    expect((await api.listProviders()).providers).toHaveLength(before - 1);
+    await expect(api.deleteProvider("nope")).rejects.toMatchObject({ kind: "providerNotFound" });
+  });
+
+  it("toggles provider enabled state", async () => {
+    const [first] = (await api.listProviders()).providers;
+    const wasEnabled = first!.enabled;
+    const toggled = await api.setProviderEnabled(first!.id, !wasEnabled);
+    expect(toggled.enabled).toBe(!wasEnabled);
+    const restored = await api.setProviderEnabled(first!.id, wasEnabled);
+    expect(restored.enabled).toBe(wasEnabled);
+  });
+
+  it("sets and clears provider key", async () => {
+    const [first] = (await api.listProviders()).providers;
+    const withKey = await api.setProviderKey(first!.id, "TEST-NOT-A-REAL-KEY");
+    expect(withKey.hasKey).toBe(true);
+    expect(withKey.keySource).toBe("auth");
+    const cleared = await api.clearProviderKey(first!.id);
+    expect(cleared.hasKey).toBe(false);
+    expect(cleared.keySource).toBe("none");
+  });
+
+  it("tests a provider with default probe result", async () => {
+    const [first] = (await api.listProviders()).providers;
+    const probe = await api.testProvider(first!.id);
+    expect(probe.reachable).toBe(true);
+    expect(probe.status).toBe(200);
+    expect(probe.tier).toBe("fast");
+    expect(probe.errorKind).toBeNull();
+  });
+
+  it("respects provider probe override", async () => {
+    const [first] = (await api.listProviders()).providers;
+    window.__omoswitchMock!.setProviderProbe(first!.id, {
+      reachable: false,
+      status: null,
+      latencyMs: 5000,
+      tier: "slow",
+      errorKind: "timeout",
+    });
+    const probe = await api.testProvider(first!.id);
+    expect(probe.reachable).toBe(false);
+    expect(probe.errorKind).toBe("timeout");
+    window.__omoswitchMock!.setProviderProbe(first!.id, "fail");
+    await expect(api.testProvider(first!.id)).rejects.toMatchObject({ kind: "networkUnreachable" });
+  });
+
+  it("fetches provider models with default result", async () => {
+    const [first] = (await api.listProviders()).providers;
+    const fetched = await api.fetchProviderModels(first!.id);
+    expect(fetched.source).toBe("v1/models");
+    expect(fetched.ids).toContain("model-a");
+  });
+
+  it("respects provider fetch override", async () => {
+    const [first] = (await api.listProviders()).providers;
+    window.__omoswitchMock!.setProviderFetch(first!.id, {
+      source: "models",
+      ids: ["custom-model"],
+    });
+    const fetched = await api.fetchProviderModels(first!.id);
+    expect(fetched.source).toBe("models");
+    expect(fetched.ids).toEqual(["custom-model"]);
+    window.__omoswitchMock!.setProviderFetch(first!.id, "fail");
+    await expect(api.fetchProviderModels(first!.id)).rejects.toMatchObject({ kind: "modelFetchParse" });
+  });
+
+  it("imports providers from opencode", async () => {
+    const result = await api.importProvidersFromOpencode();
+    expect(result.imported).toContain("openai");
+    expect(result.skipped).toContain("custom");
+    expect(result.keysFound).toBeGreaterThan(0);
+  });
 });

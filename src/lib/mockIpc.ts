@@ -1,14 +1,21 @@
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { InvokeArgs } from "@tauri-apps/api/core";
-import { seedModels, seedProfiles } from "./mockData";
+import { seedModels, seedProfiles, seedProviders } from "./mockData";
 import type {
   AppError,
   AppErrorKind,
   ApplyResult,
   BackupInfo,
+  FetchedModels,
   ImportResult,
+  ProbeResult,
   Profile,
   ProfileInput,
+  ProviderApi,
+  ProviderImportResult,
+  ProviderInfo,
+  ProviderInput,
+  ProvidersResult,
   Status,
   SwitchPreview,
 } from "./types";
@@ -16,6 +23,9 @@ import type {
 export interface OmoswitchMockControls {
   setDrift: (drifted: boolean) => void;
   setOmoMissing: (missing: boolean) => void;
+  setProviderProbe: (id: string, result: ProbeResult | "fail") => void;
+  setProviderFetch: (id: string, result: FetchedModels | "fail") => void;
+  setKeyPresent: (id: string, present: boolean) => void;
 }
 
 declare global {
@@ -25,6 +35,8 @@ declare global {
 }
 
 const CONFIG_PATH = "C:\\Users\\tom\\.omo\\omo.jsonc";
+const AGENT_DIR = "C:\\Users\\tom\\.omo\\agent";
+const MODELS_JSON_PATH = "C:\\Users\\tom\\.omo\\agent\\models.json";
 
 function fail(kind: AppErrorKind, message: string, extra: Partial<AppError> = {}): never {
   const error: AppError = { kind, message, ...extra };
@@ -51,11 +63,14 @@ function nowIso(): string {
 class MockBackend {
   private profiles = seedProfiles();
   private readonly models = seedModels();
+  private providers = seedProviders();
   private backups: BackupInfo[] = [];
   private activeProfileId: string | null = null;
   private drifted = false;
   private omoMissing = false;
   private nextId = 3;
+  private providerProbes = new Map<string, ProbeResult | "fail">();
+  private providerFetches = new Map<string, FetchedModels | "fail">();
 
   setDrift(drifted: boolean): void {
     this.drifted = drifted;
@@ -63,6 +78,22 @@ class MockBackend {
 
   setOmoMissing(missing: boolean): void {
     this.omoMissing = missing;
+  }
+
+  setProviderProbe(id: string, result: ProbeResult | "fail"): void {
+    this.providerProbes.set(id, result);
+  }
+
+  setProviderFetch(id: string, result: FetchedModels | "fail"): void {
+    this.providerFetches.set(id, result);
+  }
+
+  setKeyPresent(id: string, present: boolean): void {
+    const provider = this.providers.find((p) => p.id === id);
+    if (provider !== undefined) {
+      provider.hasKey = present;
+      provider.keySource = present ? "auth" : "none";
+    }
   }
 
   private find(id: string): Profile {
@@ -86,6 +117,9 @@ class MockBackend {
       legacySenpiPresent: true,
       omoAvailable: !this.omoMissing,
       configHash: hashOf(nativeText(active)),
+      agentDir: AGENT_DIR,
+      modelsJsonPresent: true,
+      providerCount: this.providers.length,
     };
   }
 
@@ -231,6 +265,106 @@ class MockBackend {
     this.drifted = false;
     return { changed: true, backupPath, configPath: CONFIG_PATH };
   }
+
+  private findProvider(id: string): ProviderInfo {
+    const provider = this.providers.find((p) => p.id === id);
+    if (provider === undefined) fail("providerNotFound", `provider ${id} not found`);
+    return provider;
+  }
+
+  listProviders(): ProvidersResult {
+    return {
+      agentDir: AGENT_DIR,
+      modelsJsonPath: MODELS_JSON_PATH,
+      providers: this.providers.map((p) => structuredClone(p)),
+    };
+  }
+
+  saveProvider(input: ProviderInput): ProviderInfo {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(input.id)) {
+      fail("invalidProvider", "id must match ^[a-z0-9][a-z0-9-]*$", { field: "id" });
+    }
+    if (!/^https?:\/\/.+/.test(input.baseUrl)) {
+      fail("invalidProvider", "baseUrl must start with http:// or https://", { field: "baseUrl" });
+    }
+    const validApis: ProviderApi[] = ["openai-completions", "openai-responses", "anthropic-messages"];
+    if (!validApis.includes(input.api)) {
+      fail("invalidProvider", `api must be one of: ${validApis.join(", ")}`, { field: "api" });
+    }
+    const existing = this.providers.find((p) => p.id === input.id);
+    if (existing !== undefined) {
+      const updated: ProviderInfo = {
+        ...existing,
+        name: input.name,
+        baseUrl: input.baseUrl,
+        api: input.api,
+        models: input.models,
+        inlineKey: input.inlineKey,
+      };
+      this.providers = this.providers.map((p) => (p.id === updated.id ? updated : p));
+      return structuredClone(updated);
+    }
+    const created: ProviderInfo = {
+      id: input.id,
+      name: input.name,
+      baseUrl: input.baseUrl,
+      api: input.api,
+      models: input.models,
+      enabled: true,
+      hasKey: false,
+      keySource: "none",
+      inlineKey: input.inlineKey,
+      knownToOmo: false,
+    };
+    this.providers = [...this.providers, created];
+    return structuredClone(created);
+  }
+
+  deleteProvider(id: string): void {
+    this.findProvider(id);
+    this.providers = this.providers.filter((p) => p.id !== id);
+  }
+
+  setProviderEnabled(id: string, enabled: boolean): ProviderInfo {
+    const provider = this.findProvider(id);
+    provider.enabled = enabled;
+    return structuredClone(provider);
+  }
+
+  setProviderKey(id: string, key: string): ProviderInfo {
+    const provider = this.findProvider(id);
+    if (key.trim() === "") fail("invalidProvider", "key cannot be empty", { field: "key" });
+    provider.hasKey = true;
+    provider.keySource = "auth";
+    return structuredClone(provider);
+  }
+
+  clearProviderKey(id: string): ProviderInfo {
+    const provider = this.findProvider(id);
+    provider.hasKey = false;
+    provider.keySource = "none";
+    return structuredClone(provider);
+  }
+
+  testProvider(id: string): ProbeResult {
+    this.findProvider(id);
+    const override = this.providerProbes.get(id);
+    if (override === "fail") fail("networkUnreachable", `test failed for ${id}`);
+    if (override !== undefined) return override;
+    return { reachable: true, status: 200, latencyMs: 120, tier: "fast", errorKind: null };
+  }
+
+  fetchProviderModels(id: string): FetchedModels {
+    this.findProvider(id);
+    const override = this.providerFetches.get(id);
+    if (override === "fail") fail("modelFetchParse", `fetch failed for ${id}`);
+    if (override !== undefined) return override;
+    return { source: "v1/models", ids: ["model-a", "model-b"] };
+  }
+
+  importProvidersFromOpencode(): ProviderImportResult {
+    return { imported: ["openai", "anthropic"], skipped: ["custom"], keysFound: 1 };
+  }
 }
 
 function arg<T>(payload: InvokeArgs | undefined, key: string): T {
@@ -276,6 +410,24 @@ export function installMockIpc(): OmoswitchMockControls {
         return backend.listBackups();
       case "restore_backup":
         return backend.restoreBackup(arg<string>(payload, "path"));
+      case "list_providers":
+        return backend.listProviders();
+      case "save_provider":
+        return backend.saveProvider(arg<ProviderInput>(payload, "input"));
+      case "delete_provider":
+        return backend.deleteProvider(arg<string>(payload, "id"));
+      case "set_provider_enabled":
+        return backend.setProviderEnabled(arg<string>(payload, "id"), arg<boolean>(payload, "enabled"));
+      case "set_provider_key":
+        return backend.setProviderKey(arg<string>(payload, "id"), arg<string>(payload, "key"));
+      case "clear_provider_key":
+        return backend.clearProviderKey(arg<string>(payload, "id"));
+      case "test_provider":
+        return backend.testProvider(arg<string>(payload, "id"));
+      case "fetch_provider_models":
+        return backend.fetchProviderModels(arg<string>(payload, "id"));
+      case "import_providers_from_opencode":
+        return backend.importProvidersFromOpencode();
       default:
         return fail("io", `unknown command ${cmd}`);
     }
@@ -284,6 +436,9 @@ export function installMockIpc(): OmoswitchMockControls {
   const controls: OmoswitchMockControls = {
     setDrift: (drifted) => backend.setDrift(drifted),
     setOmoMissing: (missing) => backend.setOmoMissing(missing),
+    setProviderProbe: (id, result) => backend.setProviderProbe(id, result),
+    setProviderFetch: (id, result) => backend.setProviderFetch(id, result),
+    setKeyPresent: (id, present) => backend.setKeyPresent(id, present),
   };
   window.__omoswitchMock = controls;
   return controls;
