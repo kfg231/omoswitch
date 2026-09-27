@@ -4,12 +4,14 @@ use serde_json::{Map, Value};
 #[derive(Clone, Debug)]
 struct Member {
     key: String,
+    key_start: usize,
     value_start: usize,
     value_end: usize,
 }
 
 #[derive(Clone, Debug)]
 struct Object {
+    start: usize,
     end: usize,
     members: Vec<Member>,
 }
@@ -167,10 +169,12 @@ fn object_at(text: &str, start: usize) -> Result<Object, AppError> {
         }
         if text.as_bytes()[p] == b'}' {
             return Ok(Object {
+                start,
                 end: p + 1,
                 members,
             });
         }
+        let key_start = p;
         let (key, key_end) = key_at(text, p)?;
         p = key_end;
         p = skip(text, p)?;
@@ -181,6 +185,7 @@ fn object_at(text: &str, start: usize) -> Result<Object, AppError> {
         let value_end = value_end(text, value_start)?;
         members.push(Member {
             key,
+            key_start,
             value_start,
             value_end,
         });
@@ -191,6 +196,7 @@ fn object_at(text: &str, start: usize) -> Result<Object, AppError> {
         }
         if text.as_bytes().get(p) == Some(&b'}') {
             return Ok(Object {
+                start,
                 end: p + 1,
                 members,
             });
@@ -199,36 +205,93 @@ fn object_at(text: &str, start: usize) -> Result<Object, AppError> {
     }
 }
 
-fn root_and_native(text: &str) -> Result<(Value, Object, Option<Object>), AppError> {
-    let root_start = skip(text, 0)?;
-    let root = object_at(text, root_start)?;
-    let value = parse_value(text)?;
-    let natives: Vec<&Member> = root
-        .members
-        .iter()
-        .filter(|m| m.key == "[native]")
-        .collect();
-    if natives.len() > 1 {
-        return Err(AppError::DuplicateKey {
-            key: "[native]".into(),
-            message: "duplicate top-level key".into(),
-        });
-    }
-    let native = natives
-        .first()
-        .map(|m| object_at(text, m.value_start))
-        .transpose()?;
-    if let Some(obj) = &native {
-        for key in ["agents", "categories"] {
-            if obj.members.iter().filter(|m| m.key == key).count() > 1 {
-                return Err(AppError::DuplicateKey {
-                    key: key.into(),
-                    message: "duplicate key in [native]".into(),
-                });
-            }
+#[derive(Clone, Debug)]
+struct PathResolution {
+    value: Value,
+    root: Object,
+    parent: Object,
+    member: Option<Member>,
+    missing_at: usize,
+}
+
+fn duplicate_key(object: &Object) -> Result<(), AppError> {
+    for (index, member) in object.members.iter().enumerate() {
+        if object.members[..index]
+            .iter()
+            .any(|previous| previous.key == member.key)
+        {
+            return Err(AppError::DuplicateKey {
+                key: member.key.clone(),
+                message: "duplicate key".into(),
+            });
         }
     }
-    Ok((value, root, native))
+    Ok(())
+}
+
+fn path_not_object(path: &[&str]) -> AppError {
+    AppError::NotAnObject {
+        message: format!("{} must be an object", path.join(".")),
+    }
+}
+
+fn require_path(path: &[&str]) -> Result<(), AppError> {
+    if path.is_empty() {
+        return Err(AppError::MalformedJsonc {
+            message: "object path must not be empty".into(),
+            line: 1,
+            col: 1,
+        });
+    }
+    Ok(())
+}
+
+fn resolve_path(text: &str, path: &[&str]) -> Result<PathResolution, AppError> {
+    let root_start = skip(text, 0)?;
+    if text.as_bytes().get(root_start) != Some(&b'{') {
+        return Err(path_not_object(&[]));
+    }
+    let root = object_at(text, root_start)?;
+    let value = parse_value(text)?;
+    let mut parent = root.clone();
+    for (index, key) in path.iter().enumerate() {
+        duplicate_key(&parent)?;
+        let member = parent
+            .members
+            .iter()
+            .find(|member| member.key == *key)
+            .cloned();
+        let Some(member) = member else {
+            return Ok(PathResolution {
+                value,
+                root,
+                parent,
+                member: None,
+                missing_at: index,
+            });
+        };
+        if index + 1 == path.len() {
+            return Ok(PathResolution {
+                value,
+                root,
+                parent,
+                member: Some(member),
+                missing_at: path.len(),
+            });
+        }
+        if text.as_bytes().get(member.value_start) != Some(&b'{') {
+            return Err(path_not_object(&path[..=index]));
+        }
+        parent = object_at(text, member.value_start)?;
+    }
+    duplicate_key(&parent)?;
+    Ok(PathResolution {
+        value,
+        root,
+        parent,
+        member: None,
+        missing_at: 0,
+    })
 }
 
 pub fn parse_value(text: &str) -> Result<Value, AppError> {
@@ -249,34 +312,11 @@ pub fn parse_value(text: &str) -> Result<Value, AppError> {
 }
 
 pub fn has_key(text: &str, top_key: &str) -> Result<bool, AppError> {
-    let (_, root, _) = root_and_native(text)?;
-    Ok(root.members.iter().any(|m| m.key == top_key))
+    Ok(resolve_path(text, &[top_key])?.member.is_some())
 }
 
-pub fn native_subtrees(text: &str) -> Result<(Map<String, Value>, Map<String, Value>), AppError> {
-    let (value, _, _) = root_and_native(text)?;
-    let Some(native) = value.get("[native]") else {
-        return Ok((Map::new(), Map::new()));
-    };
-    let Some(obj) = native.as_object() else {
-        return Err(AppError::NotAnObject {
-            message: "[native] must be an object".into(),
-        });
-    };
-    let get = |key: &str| -> Result<Map<String, Value>, AppError> {
-        match obj.get(key) {
-            None => Ok(Map::new()),
-            Some(Value::Object(map)) => Ok(map.clone()),
-            Some(_) => Err(AppError::NotAnObject {
-                message: format!("[native].{key} must be an object"),
-            }),
-        }
-    };
-    Ok((get("agents")?, get("categories")?))
-}
-
-fn pretty(value: &Map<String, Value>, newline: &str) -> String {
-    serde_json::to_string_pretty(&Value::Object(value.clone()))
+fn pretty(value: &Value, newline: &str) -> String {
+    serde_json::to_string_pretty(value)
         .unwrap_or_else(|_| "{}".into())
         .replace('\n', newline)
 }
@@ -296,7 +336,7 @@ fn indent_unit(text: &str, root: &Object) -> String {
     )
 }
 
-fn reindent(value: &Map<String, Value>, newline: &str, unit: &str, base: &str) -> String {
+fn reindent(value: &Value, newline: &str, unit: &str, base: &str) -> String {
     pretty(value, newline)
         .split(newline)
         .enumerate()
@@ -316,129 +356,83 @@ fn has_comma_after(text: &str, at: usize) -> bool {
     skip(text, at).is_ok_and(|position| text.as_bytes().get(position) == Some(&b','))
 }
 
-fn native_member(
-    agents: &Map<String, Value>,
-    categories: &Map<String, Value>,
-    newline: &str,
-    unit: &str,
-    member_indent: &str,
-) -> String {
-    let child_indent = format!("{member_indent}{unit}");
-    let agents_text = reindent(agents, newline, unit, &child_indent);
-    let categories_text = reindent(categories, newline, unit, &child_indent);
-    format!(
-        "\"[native]\": {{{newline}{child_indent}\"agents\": {agents_text},{newline}{child_indent}\"categories\": {categories_text}{newline}{member_indent}}}"
+fn member_indent(text: &str, object: &Object, unit: &str) -> String {
+    object.members.first().map_or_else(
+        || format!("{}{}", line_indent(text, object.start), unit),
+        |member| line_indent(text, member.key_start),
     )
 }
 
-pub fn set_native_subtrees(
+fn insert_member(
     text: &str,
-    agents: &Map<String, Value>,
-    categories: &Map<String, Value>,
-) -> Result<String, AppError> {
-    let (mut expected, root, native) = root_and_native(text)?;
-    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
-    let unit = indent_unit(text, &root);
-    let root_obj = expected
-        .as_object_mut()
-        .ok_or_else(|| AppError::NotAnObject {
-            message: "root must be an object".into(),
-        })?;
-    let native_value = root_obj
-        .entry("[native]")
-        .or_insert_with(|| Value::Object(Map::new()));
-    let native_obj = native_value
-        .as_object_mut()
-        .ok_or_else(|| AppError::NotAnObject {
-            message: "[native] must be an object".into(),
-        })?;
-    native_obj.insert("agents".into(), Value::Object(agents.clone()));
-    native_obj.insert("categories".into(), Value::Object(categories.clone()));
-    let mut edits: Vec<(usize, usize, String)> = Vec::new();
-    if let Some(native_obj_spans) = native {
-        for (key, map) in [("agents", agents), ("categories", categories)] {
-            if let Some(member) = native_obj_spans.members.iter().find(|m| m.key == key) {
-                let member_indent = line_indent(text, member.value_start);
-                edits.push((
-                    member.value_start,
-                    member.value_end,
-                    reindent(map, newline, &unit, &member_indent),
-                ));
-            } else {
-                let member_indent = native_obj_spans.members.first().map_or_else(
-                    || format!("{unit}{unit}"),
-                    |member| line_indent(text, member.value_start),
-                );
-                let comma = native_obj_spans
-                    .members
-                    .last()
-                    .is_some_and(|member| has_comma_after(text, member.value_end));
-                let separator = if native_obj_spans.members.is_empty() || comma {
-                    ""
-                } else {
-                    ","
-                };
-                edits.push((
-                    native_obj_spans.end - 1,
-                    native_obj_spans.end - 1,
-                    format!(
-                        "{separator}{newline}{member_indent}\"{key}\": {}{}",
-                        reindent(map, newline, &unit, &member_indent),
-                        if comma { "," } else { "" }
-                    ),
-                ));
+    object: &Object,
+    key: &str,
+    value: &Value,
+    path: &[&str],
+    newline: &str,
+    unit: &str,
+) -> Result<(usize, String), AppError> {
+    let key_text = serde_json::to_string(key).unwrap_or_else(|_| format!("\"{key}\""));
+    let indent = member_indent(text, object, unit);
+    let value_text = reindent(value, newline, unit, &indent);
+    let member = format!("{key_text}: {value_text}");
+
+    if object.members.is_empty() {
+        let base = line_indent(text, object.start);
+        return Ok((
+            object.end - 1,
+            format!("{newline}{indent}{member}{newline}{base}"),
+        ));
+    }
+
+    if path.first() == Some(&"[native]") && path.len() > 1 && object.start == skip(text, 0)? {
+        if let Some(opencode) = object.members.iter().find(|m| m.key == "[opencode]") {
+            let after_value = skip(text, opencode.value_end)?;
+            if text.as_bytes().get(after_value) == Some(&b',') {
+                return Ok((after_value + 1, format!("{newline}{indent}{member},")));
             }
-        }
-    } else {
-        let member_indent = root
-            .members
-            .first()
-            .map_or_else(String::new, |member| line_indent(text, member.value_start));
-        let member = native_member(agents, categories, newline, &unit, &member_indent);
-        if let Some(opencode) = root
-            .members
-            .iter()
-            .find(|member| member.key == "[opencode]")
-        {
-            let comma = skip(text, opencode.value_end)
-                .ok()
-                .and_then(|position| text.as_bytes().get(position))
-                .is_some_and(|byte| *byte == b',');
-            let insertion_at = skip(text, opencode.value_end)
-                .map(|position| position + usize::from(comma))
-                .map_err(|_| malformed(text, opencode.value_end, "invalid member separator"))?;
-            edits.push((
-                insertion_at,
-                insertion_at,
-                format!(
-                    "{}{newline}{member_indent}{member}{}",
-                    if comma { "" } else { "," },
-                    if comma { "," } else { "" }
-                ),
-            ));
-        } else if let Some(last) = root.members.last() {
-            if has_comma_after(text, last.value_end) {
-                edits.push((
-                    root.end - 1,
-                    root.end - 1,
-                    format!("{member_indent}{member},{newline}"),
-                ));
-            } else {
-                edits.push((
-                    last.value_end,
-                    last.value_end,
-                    format!(",{newline}{member_indent}{member}"),
-                ));
-            }
-        } else {
-            edits.push((
-                root.end - 1,
-                root.end - 1,
-                format!("{newline}{member_indent}{member}{newline}"),
-            ));
+            return Ok((opencode.value_end, format!(",{newline}{indent}{member}")));
         }
     }
-    edits.sort_by(|a, b| b.0.cmp(&a.0));
+
+    let last = object
+        .members
+        .last()
+        .ok_or_else(|| malformed(text, object.start, "object has no members"))?;
+    if has_comma_after(text, last.value_end) {
+        Ok((object.end - 1, format!("{indent}{member}{newline}")))
+    } else {
+        Ok((last.value_end, format!(",{newline}{indent}{member}")))
+    }
+}
+
+fn set_expected(root: &mut Value, path: &[&str], replacement: &Value) -> Result<(), AppError> {
+    let mut current = root;
+    for (index, key) in path[..path.len() - 1].iter().enumerate() {
+        let object = current
+            .as_object_mut()
+            .ok_or_else(|| path_not_object(&path[..=index]))?;
+        let child = object
+            .entry((*key).to_owned())
+            .or_insert_with(|| Value::Object(Map::new()));
+        if !child.is_object() {
+            return Err(path_not_object(&path[..=index + 1]));
+        }
+        current = child;
+    }
+    let object = current
+        .as_object_mut()
+        .ok_or_else(|| path_not_object(&path[..path.len() - 1]))?;
+    object.insert(path[path.len() - 1].to_owned(), replacement.clone());
+    Ok(())
+}
+
+fn edited_result(
+    text: &str,
+    mut edits: Vec<(usize, usize, String)>,
+    expected: &Value,
+) -> Result<String, AppError> {
+    edits.sort_by(|left, right| right.0.cmp(&left.0));
     let mut result = text.to_owned();
     for (start, end, replacement) in edits {
         result.replace_range(start..end, &replacement);
@@ -446,12 +440,141 @@ pub fn set_native_subtrees(
     let reparsed = parse_value(&result).map_err(|error| AppError::VerifyFailed {
         message: format!("{error}; generated={result}"),
     })?;
-    if reparsed != expected {
+    if &reparsed != expected {
         return Err(AppError::VerifyFailed {
-            message: "edited JSONC did not match expected value".into(),
+            message: format!("edited JSONC did not match expected value; generated={result}"),
         });
     }
     Ok(result)
+}
+
+pub fn set_object_path(text: &str, path: &[&str], value: &Value) -> Result<String, AppError> {
+    require_path(path)?;
+    let resolution = resolve_path(text, path)?;
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let unit = indent_unit(text, &resolution.root);
+    let mut expected = resolution.value.clone();
+    set_expected(&mut expected, path, value)?;
+
+    let Some(member) = resolution.member else {
+        let mut missing_value = value.clone();
+        for key in path[resolution.missing_at + 1..path.len()].iter().rev() {
+            let mut object = Map::new();
+            object.insert((*key).to_owned(), missing_value);
+            missing_value = Value::Object(object);
+        }
+        let (at, insertion) = insert_member(
+            text,
+            &resolution.parent,
+            path[resolution.missing_at],
+            &missing_value,
+            path,
+            newline,
+            &unit,
+        )?;
+        return edited_result(text, vec![(at, at, insertion)], &expected);
+    };
+
+    let indent = line_indent(text, member.key_start);
+    edited_result(
+        text,
+        vec![(
+            member.value_start,
+            member.value_end,
+            reindent(value, newline, &unit, &indent),
+        )],
+        &expected,
+    )
+}
+
+pub fn get_object_path(text: &str, path: &[&str]) -> Result<Option<Value>, AppError> {
+    require_path(path)?;
+    let resolution = resolve_path(text, path)?;
+    let mut current = resolution.value;
+    for key in path {
+        let Some(object) = current.as_object() else {
+            return Err(path_not_object(path));
+        };
+        let Some(value) = object.get(*key) else {
+            return Ok(None);
+        };
+        current = value.clone();
+    }
+    Ok(Some(current))
+}
+
+pub fn remove_object_path(text: &str, path: &[&str]) -> Result<String, AppError> {
+    require_path(path)?;
+    let resolution = resolve_path(text, path)?;
+    let Some(member) = resolution.member else {
+        return Ok(text.to_owned());
+    };
+    let mut edits = vec![(member.key_start, member.value_end, String::new())];
+    if let Some(comma) = skip(text, member.value_end)
+        .ok()
+        .filter(|position| text.as_bytes().get(*position) == Some(&b','))
+    {
+        edits.push((comma, comma + 1, String::new()));
+    } else if let Some(index) = resolution
+        .parent
+        .members
+        .iter()
+        .position(|candidate| candidate.key_start == member.key_start)
+        .and_then(|index| index.checked_sub(1))
+    {
+        let previous = &resolution.parent.members[index];
+        let comma = skip(text, previous.value_end)?;
+        if text.as_bytes().get(comma) != Some(&b',') {
+            return Err(malformed(text, comma, "expected member separator"));
+        }
+        edits.push((comma, comma + 1, String::new()));
+    }
+    let mut expected = resolution.value;
+    let mut current = &mut expected;
+    for key in &path[..path.len() - 1] {
+        current = current
+            .as_object_mut()
+            .and_then(|object| object.get_mut(*key))
+            .ok_or_else(|| path_not_object(path))?;
+    }
+    let object = current
+        .as_object_mut()
+        .ok_or_else(|| path_not_object(path))?;
+    object.remove(path[path.len() - 1]);
+    edited_result(text, edits, &expected)
+}
+
+pub fn native_subtrees(text: &str) -> Result<(Map<String, Value>, Map<String, Value>), AppError> {
+    let get = |path: &[&str]| -> Result<Map<String, Value>, AppError> {
+        match get_object_path(text, path)? {
+            None => Ok(Map::new()),
+            Some(Value::Object(map)) => Ok(map),
+            Some(_) => Err(AppError::NotAnObject {
+                message: format!("{} must be an object", path.join(".")),
+            }),
+        }
+    };
+    Ok((
+        get(&["[native]", "agents"])?,
+        get(&["[native]", "categories"])?,
+    ))
+}
+
+pub fn set_native_subtrees(
+    text: &str,
+    agents: &Map<String, Value>,
+    categories: &Map<String, Value>,
+) -> Result<String, AppError> {
+    let with_agents = set_object_path(
+        text,
+        &["[native]", "agents"],
+        &Value::Object(agents.clone()),
+    )?;
+    set_object_path(
+        &with_agents,
+        &["[native]", "categories"],
+        &Value::Object(categories.clone()),
+    )
 }
 
 #[cfg(test)]
@@ -494,6 +617,26 @@ mod tests {
             "insert-after-opencode" => include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/tests/fixtures/insert_after_opencode.jsonc"
+            )),
+            "models-commented" => include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/models_json_commented.jsonc"
+            )),
+            "models-crlf" => include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/models_json_crlf.jsonc"
+            )),
+            "models-empty" => include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/models_json_empty.jsonc"
+            )),
+            "models-dup" => include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/models_json_dup_providers.jsonc"
+            )),
+            "models-disabled" => include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/models_json_disabled.jsonc"
             )),
             _ => unreachable!(),
         }
@@ -657,5 +800,132 @@ mod tests {
         let (a, c) = maps();
         let out = set_native_subtrees(fixture("senpi"), &a, &c).unwrap();
         assert!(out.contains("[senpi]"));
+    }
+
+    #[test]
+    fn nested_insert_into_missing_providers() {
+        let value = serde_json::json!({"name": "fake-provider"});
+        let out = set_object_path(
+            fixture("models-empty"),
+            &["providers", "wawazz-gpt"],
+            &value,
+        )
+        .unwrap();
+        assert_eq!(
+            get_object_path(&out, &["providers", "wawazz-gpt"]).unwrap(),
+            Some(value)
+        );
+    }
+
+    #[test]
+    fn replace_provider_preserves_sibling_bytes() {
+        let old = fixture("models-disabled");
+        let start = old.find("\"TEST-NOT-A-REAL-KEY\"").unwrap();
+        let end = old[start..].find("\n  },").unwrap() + start;
+        let prefix = &old[..start];
+        let suffix = &old[end..];
+        let out = set_object_path(
+            old,
+            &["providers", "TEST-NOT-A-REAL-KEY"],
+            &serde_json::json!({"name": "replacement"}),
+        )
+        .unwrap();
+        assert_eq!(&out[..prefix.len()], prefix);
+        assert_eq!(&out[out.len() - suffix.len()..], suffix);
+    }
+
+    #[test]
+    fn models_crlf_stays_crlf() {
+        let old = fixture("models-crlf");
+        assert!(old.contains("\r\n"));
+        let out = set_object_path(
+            &old,
+            &["providers", "new-provider"],
+            &serde_json::json!({"name": "fake-provider"}),
+        )
+        .unwrap();
+        assert!(!out.replace("\r\n", "").contains('\n'));
+    }
+
+    #[test]
+    fn setting_same_value_is_idempotent() {
+        let value = serde_json::json!({"name": "replacement"});
+        let once = set_object_path(
+            fixture("models-disabled"),
+            &["providers", "TEST-NOT-A-REAL-KEY"],
+            &value,
+        )
+        .unwrap();
+        assert_eq!(
+            set_object_path(&once, &["providers", "TEST-NOT-A-REAL-KEY"], &value).unwrap(),
+            once
+        );
+    }
+
+    #[test]
+    fn comments_survive_provider_update() {
+        let old = fixture("models-commented");
+        let out = set_object_path(
+            old,
+            &["providers", "TEST-NOT-A-REAL-KEY"],
+            &serde_json::json!({"name": "replacement"}),
+        )
+        .unwrap();
+        for comment in [
+            "comment before providers",
+            "comment before providers member",
+            "comment inside providers",
+            "block comment inside providers",
+            "comment after providers",
+            "comment after providers object",
+        ] {
+            assert!(out.contains(comment), "missing comment: {comment}");
+        }
+    }
+
+    #[test]
+    fn remove_provider_fixes_comma_and_keeps_sibling() {
+        let old = "{\n  \"providers\": {\n    \"first\": 1,\n    \"second\": 2,\n  },\n}";
+        let out = remove_object_path(old, &["providers", "first"]).unwrap();
+        assert_eq!(parse_value(&out).unwrap()["providers"]["second"], 2);
+        assert!(out.contains("\"second\": 2"));
+    }
+
+    #[test]
+    fn duplicate_key_at_depth_is_rejected() {
+        let result = get_object_path(fixture("models-dup"), &["providers", "x"]);
+        assert!(matches!(result, Err(AppError::DuplicateKey { key, .. }) if key == "providers"));
+    }
+
+    #[test]
+    fn path_through_non_object_is_rejected() {
+        let result = set_object_path(
+            fixture("models-disabled"),
+            &["disabledProviders", "x"],
+            &serde_json::json!(true),
+        );
+        assert!(matches!(result, Err(AppError::NotAnObject { .. })));
+    }
+
+    #[test]
+    fn empty_path_is_rejected() {
+        let result = get_object_path(fixture("models-empty"), &[]);
+        assert!(matches!(result, Err(AppError::MalformedJsonc { .. })));
+    }
+
+    #[test]
+    fn missing_remove_is_unchanged() {
+        let old = fixture("models-disabled");
+        assert_eq!(
+            remove_object_path(old, &["providers", "missing"]).unwrap(),
+            old
+        );
+    }
+
+    #[test]
+    fn native_wrappers_use_object_paths() {
+        let (agents, categories) = maps();
+        let out = set_native_subtrees(fixture("empty"), &agents, &categories).unwrap();
+        assert_eq!(native_subtrees(&out).unwrap(), (agents, categories));
     }
 }

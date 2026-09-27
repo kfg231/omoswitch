@@ -1,0 +1,13 @@
+// comment before providers
+{
+  /* comment before providers member */
+  "providers": {
+    // comment inside providers
+    /* block comment inside providers */
+    "TEST-NOT-A-REAL-KEY": {
+      "name": "fake-provider",
+    },
+  }, // comment after providers
+  "other": "keep-me",
+  /* comment after providers object */
+}

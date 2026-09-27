@@ -1,0 +1,6 @@
+{
+  "providers": {
+    "TEST-NOT-A-REAL-KEY": { "name": "fake-provider" },
+  },
+  "disabledProviders": ["x"],
+}
