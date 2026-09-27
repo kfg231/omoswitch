@@ -412,3 +412,246 @@ $cli="src-tauri\target\debug\omoswitch-cli.exe"
 | S12 | (after user OK) backup real file, clear overrides, apply `base` via tray | real file has `[native]`, omoswitch backup exists, new reload entry in `~/.omo/agent/logs/config-reload.log`, `[opencode]` byte-identical |
 
 Cleanup `$qa` after S12; keep `real-backup.jsonc` until the user OKs deletion.
+
+# PHASE 2 PLAN — decisions (D1–D15)
+
+**D1 Agent dir precedence:** `OMOSWITCH_OMO_AGENT_DIR` > `OMO_CODING_AGENT_DIR` > `<omo_home>/agent`.
+`SENPI_/PI_CODING_AGENT_DIR` NOT honored. Consequence: QA runs under `OMOSWITCH_OMO_HOME` alone and gets a temp
+agent dir for free. `Status` reports the resolved dir.
+
+**D2 Generalize the editor, do not duplicate.** Add to `jsonc_edit.rs`:
+`set_object_path(text,&[&str],&Value)`, `get_object_path`, `remove_object_path`. Refactor `root_and_native` into a
+generic `resolve_path` walking the path, reusing the existing scanner (`skip`/`string_end`/`value_end`/`object_at`/
+`key_at`) untouched. `set_native_subtrees`/`native_subtrees` become thin wrappers over
+`&["[native]","agents"]` / `&["[native]","categories"]`. The 19 existing `jsonc_edit` + 11 `omo_config` tests are the
+regression harness and must pass UNMODIFIED.
+
+**D3 Two files, two owners:** `providers.rs` owns `<agent_dir>/models.json` (JSONC-safe via D2 + phase-1 atomic
+write/backup/sha256 guard). `auth.rs` owns `<agent_dir>/auth.json`. Keys to auth.json by default; inline `apiKey`
+only via explicit per-provider `inlineKey: true`.
+
+**D4 Additive:** never delete to disable — use `disabledProviders`. Delete is a separate confirmed action.
+
+**D5 Secret hygiene (hard invariants):** `ProviderInfo` carries `hasKey: boolean` + `keySource`, NEVER the value.
+`auth.rs` exposes no getter returning a key; only `has_key(id)`. No key in any `AppError.message`, log, preview,
+DOM node, backup filename, or argv. auth.json is never copied to `%TEMP%`; its atomic temp file lives in the agent
+dir. No backups of auth.json (a backup is a second long-lived plaintext copy).
+
+**D6 0600 honestly:** unix → `set_permissions(0o600)` on the temp file before rename. Windows → no chmod; the file
+inherits the owner-only DACL of `%USERPROFILE%`; guarantee is only "never weaken it, never write outside the agent
+dir". No DACL surgery.
+
+**D7 HTTP crate `ureq` (blocking, rustls), NOT reqwest.** Two requests with 8s/15s timeouts need no async runtime;
+reqwest pulls tokio+hyper. Pin exactly: `ureq = { version = "=3.x.y", default-features = false, features = ["rustls"] }`
+— verify the exact latest 3.x patch via context7 at execution time. Tauri commands run on a thread pool so blocking is
+safe. T0 records `cargo build` wall time before/after in its commit body so the cost is measured. If ureq 3 cannot be
+pinned cleanly, fall back to `reqwest = { version = "=0.12.x", default-features = false,
+features = ["rustls-tls","json","blocking"] }` and say so in the commit.
+
+**D8 Preset catalog: 10 + Custom**, in `src/lib/providerCatalog.ts` ONLY (Rust never hardcodes a provider list, so the
+two cannot drift): `openai`, `anthropic`, `deepseek`, `openrouter`, `groq`, `moonshot`, `zhipu`, `ollama`, `lmstudio`,
+`google`, `custom`. Each `{ id, displayName, baseUrl, api, websiteUrl, apiKeyUrl, defaultModels[] }`. `api` is a
+PROTOCOL name never an npm package: anthropic → `anthropic-messages`; rest → `openai-completions`; ollama/lmstudio →
+localhost baseUrl, `apiKeyUrl: null`, no key required.
+
+**D9 Probe:** `GET {baseUrl}` (no path append, no inference, no body), 8s timeout, `Authorization` only if a key
+exists. Reachable ⇔ any HTTP response at all (200/401/403/404 included); unreachable ⇔ DNS/TLS/connect/timeout.
+Tiers: `fast` <300ms, `ok` <1200ms, `slow` ≥1200ms. Returns
+`{ reachable, status: number|null, latencyMs, tier, errorKind: "dns"|"tls"|"connect"|"timeout"|null }` — never a raw
+error string that could echo a URL-embedded credential.
+
+**D10 Live model fetch:** `GET {baseUrl}/models`; on 404/400 retry `{baseUrl}/v1/models`. 15s timeout. Parse
+`{data:[{id}]}`, `{models:[{slug}]}`, and a bare `[{id}]`. Unparsable → `modelFetchParse`. Result is OFFERED as
+checkboxes, never auto-written.
+
+**D11 IME safety is structural.** New `src/components/ImeSafeInput.tsx`: local `useState` draft; `onChange` updates
+draft only; commits on blur and on Enter when `event.nativeEvent.isComposing === false`; resyncs from props only
+while unfocused. EVERY model-id/model-name/provider-id/provider-name/baseUrl field uses it. Rows keyed by a stable
+generated `rowId`, NEVER by model id — keying by id is the other half of the trap. `ModelPicker`'s existing free-text
+input migrates to it too (T10), fixing a pre-existing Japanese-input bug.
+
+**D12 Assignments ↔ providers:** `ModelPicker` merges `omo --list-models` output with configured-provider models,
+tagged by source. `AssignmentRow` shows a dead-reference warning when the `provider/` prefix is in neither set — the
+exact state this machine is in now — with a one-click "configure this provider" jump pre-filling the id.
+
+**D13 TDD everywhere.** Fixtures + failing tests first. Fixture keys are literally `TEST-NOT-A-REAL-KEY`.
+
+**D14 New error kinds:** `providerNotFound`, `invalidProvider{field}`, `networkUnreachable`, `modelFetchParse`.
+`configMissing` is NOT reused for a missing models.json (missing = empty map, not an error).
+
+**D15 Commits:** Conventional Commits, one per task, staging only that task's owned files. Pre-commit gate:
+`rg -i "(api[_-]?key|token|secret|bearer|sk-)"` over staged files returns only field-name identifiers and the literal
+`TEST-NOT-A-REAL-KEY`.
+
+## Phase 2 contract additions
+
+```ts
+type ProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages";
+type KeySource = "auth" | "inline" | "env" | "none";
+interface ProviderModel { id: string; name?: string; reasoning?: boolean; contextWindow?: number; maxTokens?: number; }
+interface ProviderInfo { id: string; name: string; baseUrl: string; api: ProviderApi;
+  models: ProviderModel[]; enabled: boolean; hasKey: boolean; keySource: KeySource;
+  inlineKey: boolean; knownToOmo: boolean; }
+interface ProviderInput { id: string; name: string; baseUrl: string; api: ProviderApi;
+  models: ProviderModel[]; inlineKey: boolean; }
+interface ProvidersResult { agentDir: string; modelsJsonPath: string; providers: ProviderInfo[]; }
+interface ProbeResult { reachable: boolean; status: number | null; latencyMs: number;
+  tier: "fast" | "ok" | "slow"; errorKind: "dns"|"tls"|"connect"|"timeout"|null; }
+interface FetchedModels { source: "models" | "v1/models"; ids: string[]; }
+interface ProviderImportResult { imported: string[]; skipped: string[]; keysFound: number; }
+```
+
+9 new commands: `list_providers`, `save_provider{input}`, `delete_provider{id}`, `set_provider_enabled{id,enabled}`,
+`set_provider_key{id,key}`, `clear_provider_key{id}`, `test_provider{id}`→`ProbeResult`,
+`fetch_provider_models{id}`→`FetchedModels`, `import_providers_from_opencode`→`ProviderImportResult`.
+`Status` gains `agentDir: string`, `modelsJsonPresent: boolean`, `providerCount: number`.
+CLI gains: `providers`, `provider-add --id --base-url --api [--model …]`, `provider-enable <id>`,
+`provider-disable <id>`, `provider-key <id> --stdin` (stdin ONLY — argv is visible in the process list),
+`provider-test <id>`, `provider-models <id>`, `providers-import`.
+
+### models.json shape written
+
+```jsonc
+{
+  "providers": {
+    "wawazz-gpt": { "name": "Wawazz GPT", "baseUrl": "https://wawazz.xyz/v1",
+      "api": "openai-completions", "models": [{ "id": "gpt-6-astra" }, { "id": "gpt-6-sol" }] }
+  },
+  "disabledProviders": []
+}
+```
+
+## Phase 2 file ownership (no two parallel tasks share a file)
+
+| File | Sole owner |
+|---|---|
+| `error.rs`, `paths.rs`, `lib.rs`, `Cargo.toml` | T0 (T9 re-opens `lib.rs` alone in Wave 4) |
+| `jsonc_edit.rs`, `tests/fixtures/models_json_*.jsonc` | T1 |
+| `net.rs` | T2 |
+| `auth.rs`, `tests/fixtures/auth_json_*.json` | T3 |
+| `types.ts`, `api.ts`, `mockIpc.ts`, `mockData.ts`, `providerCatalog.ts` | T4 |
+| `i18n/ja.json`, `i18n/en.json` | T5 |
+| `components/ImeSafeInput.tsx` + its test | T6 |
+| `providers.rs` | T7 |
+| `components/ProviderList.tsx`, `ProviderEditor.tsx`, `ProviderModelsTable.tsx` | T8 |
+| `commands.rs`, `tray.rs`, `bin/omoswitch-cli.rs`, `lib.rs` | T9 |
+| `App.tsx`, `components/AssignmentRow.tsx`, `components/ModelPicker.tsx` | T10 |
+| `e2e/providers.spec.ts`, `e2e/providerKey.spec.ts`, `e2e/helpers.ts` | T11 |
+| `.omo/plans/omoswitch.md`, `README.md` | T12 |
+
+## Phase 2 waves
+
+**Wave 1 — T0 alone (owns every shared file; must finish before anything else starts).**
+`deep-low`, skills [`programming`,`context7-mcp`]. Add the 4 D14 error kinds to `error.rs`; add
+`agent_dir()`/`models_json_path()`/`auth_json_path()` to `paths.rs` with D1 precedence + 4 tests (derived from
+omo_home / `OMO_CODING_AGENT_DIR` honored / `OMOSWITCH_OMO_AGENT_DIR` wins / defaults); declare
+`pub mod providers; pub mod auth; pub mod net;` in `lib.rs` with compiling stubs; pin `ureq` per D7.
+Accept: `cargo test` ≥52 pass 0 failed; `cargo build` links ureq.
+Commit: `chore(core): agent-dir paths, provider error kinds, ureq pin`
+
+**Wave 2 — T1..T6 in parallel (all depend only on T0).**
+- T1 `deep-low` [`programming`,`refactor`] — D2 generalization. Fixtures first: `models_json_commented.jsonc`
+  (providers + `//` and `/* */` comments before/inside/after, trailing comma), `_crlf`, `_empty` (`{}`),
+  `_dup_providers`, `_disabled`. ≥9 new tests: nested insert into missing `providers`; replace one provider leaving
+  sibling bytes identical; CRLF in→out no bare `\n`; idempotency; comment preservation; `remove_object_path` fixes
+  commas; duplicate key at depth → `duplicateKey`; deep path into non-object → `notAnObject`; `path=[]` rejected.
+  Accept: `cargo test jsonc_edit` ≥28 pass with the 19 existing tests UNMODIFIED; `cargo test omo_config` still 11.
+  Commit: `refactor(core): generalize JSONC span-splice to arbitrary object paths`
+- T2 `deep-low` [`programming`,`context7-mcp`] — `net.rs` per D9/D10. Tests use a local `std::net::TcpListener` stub,
+  NO real network. Accept: `cargo test net` ≥7 pass incl. an assertion that a credential-looking URL segment never
+  appears in the error string. Commit: `feat(core): provider reachability probe and live model fetch`
+- T3 `deep-low` [`programming`] — `auth.rs` per D5/D6: `has_key`/`set_key`/`clear_key`/`key_source`. Accept:
+  `cargo test auth` ≥6 pass; unix mode 0600 assertion; temp-parent == agent dir; no fn returns a key.
+  Commit: `feat(core): auth.json credential store with restricted permissions`
+- T4 `visual-engineering` [`frontend`,`programming`] — contract types + 9 api wrappers + 9 mock cases +
+  `window.__omoswitchMock.setProviderProbe/setProviderFetch/setKeyPresent` + 3 seed providers (one disabled, one
+  dead-reference matching reality) + `providerCatalog.ts` (D8). Accept: `pnpm test` ≥43 pass; `pnpm build` 0; no `any`.
+  Commit: `feat(ui): provider contract, mock backend, preset catalog`
+- T5 `quick` [] — `provider.*` + 4 `error.*` keys in BOTH `ja.json` and `en.json`, identical key sets; rename/delete
+  nothing; touch no `.tsx`. Accept: `pnpm test` green incl. i18n parity.
+  Commit: `feat(ui): japanese and english strings for provider management`
+- T6 `visual-engineering` [`frontend`,`programming`] — `ImeSafeInput` per D11. Five tests first, demonstrated RED
+  against a naive onChange passthrough: mid-composition parent state unchanged; commit once on compositionend+blur;
+  Enter during composition does not commit; focus retained across parent re-render; external prop change while
+  focused does not clobber the draft. Commit: `feat(ui): IME-safe text input committing on blur`
+
+**Wave 3 — T7, T8 in parallel.**
+- T7 `deep-low` [`programming`] — `providers.rs`: `list(paths, omo_models)`, `save(paths, ProviderInput)`,
+  `delete(paths, id)`, `set_enabled(paths, id, bool)` via `disabledProviders`, `import_from_opencode(paths)` reading
+  `~/.config/opencode/opencode.json` (keys routed to `auth.rs`, never echoed). All writes via
+  `jsonc_edit::set_object_path` + phase-1 atomic write + sha256 changed-on-disk guard +
+  `models.json.bak.omoswitch-<ts>` pruned to 20. Missing models.json → create `{"providers":{}}`; missing = empty map,
+  never `configMissing`. Validation: id `^[a-z0-9][a-z0-9-]*$`, baseUrl non-empty `http(s)://`, `api` ∈ the 3
+  protocols → else `invalidProvider{field}`. Accept: `cargo test providers` ≥10 pass incl. comment preservation,
+  sibling bytes identical, disable-without-delete, idempotent save `changed:false` no backup, prune keeps 20, and
+  zero key bytes in models.json when `inlineKey` is false.
+  Commit: `feat(core): provider service writing ~/.omo/agent/models.json`
+- T8 `visual-engineering` [`frontend`,`visual-qa`] — `ProviderList.tsx` (name, id, baseUrl, enabled toggle,
+  hasKey/keySource badge, knownToOmo badge, test button + latency tier, edit/delete), `ProviderEditor.tsx` (preset
+  dropdown pre-filling baseUrl/api/models; id/name/baseUrl/api select; key field password-type write-only showing
+  "key set" not the value, plus clear-key; `inlineKey` opt-out with explicit warning; model table), 
+  `ProviderModelsTable.tsx` (rows keyed by generated `rowId`, every text cell an `ImeSafeInput`, fetch-models merge as
+  checkboxes). All strings from T5; a11y labels/focus trap/Esc/focus rings; light+dark.
+  Accept: `pnpm build` + `pnpm test` green; visual-qa PASS on 5 states (empty, populated, disabled, key-set,
+  probe-failed) × ja/en × light/dark; no key value in any DOM node.
+  Commit: `feat(ui): provider list, editor, and model table screens`
+
+**Wave 4 — T9, T10 in parallel.**
+- T9 `deep-low` [`programming`,`context7-mcp`] — 9 commands in `commands.rs`, registered in the `lib.rs`
+  `invoke_handler`; `Status` + `agentDir`/`modelsJsonPresent`/`providerCount`; tray tooltip provider count; 8 CLI
+  subcommands with `provider-key` reading stdin ONLY. Accept: full `cargo test` green; `omoswitch-cli providers` on a
+  temp home prints `providers:[]` exit 0; `rg -- "--key" src-tauri/src/bin/omoswitch-cli.rs` → 0 matches.
+  Commit: `feat(app): provider tauri commands, tray count, cli subcommands`
+- T10 `visual-engineering` [`frontend`,`visual-qa`] — Providers view in `App.tsx` on the existing 3s poll/focus cycle;
+  `ModelPicker` merges configured-provider models with `omo --list-models` tagged by source and adopts `ImeSafeInput`;
+  `AssignmentRow` dead-reference warning + "configure this provider" jump pre-filling the id (D12).
+  Accept: warning renders for seeded `wawazz-gpt` and clears once configured; Japanese model entry keeps focus.
+  Commit: `feat(ui): providers view, provider-aware model picker, dead-reference warning`
+
+**Wave 5 — T11 then T12.**
+- T11 `visual-engineering` [`playwright`,`frontend`] — `e2e/providers.spec.ts` (list renders; add via preset;
+  enable/disable; delete with confirm; test button shows tier; fetch-models merges ids; dead-reference warning appears
+  then clears) + `e2e/providerKey.spec.ts` (set key → "key set" badge; clear key; NO key text anywhere in
+  `page.content()`; IME Japanese entry into a model cell keeps focus); extend `e2e/helpers.ts`.
+  Accept: `pnpm e2e` ≥18 pass on the **Edge channel** — do NOT switch to Chromium, its download times out here.
+  Commit: `test(e2e): provider management flows against the mock`
+- T12 `unspecified-high` [`debugging`,`playwright`,`git-master`,`visual-qa`] — run P1–P10, paste real outputs, fix
+  anything red; update `README.md` env vars; ASK THE USER before P-final; then tag `v0.2.0`.
+  Commit: `test(qa): phase 2 scenario contract; docs: provider env vars`
+
+## Phase 2 scenario contract (binary, exact commands)
+
+One `OMOSWITCH_OMO_HOME` gives a temp agent dir for free (D1); nothing below touches real `~/.omo`:
+
+```pwsh
+$qa="$env:TEMP\omoswitch-qa2"
+New-Item -ItemType Directory -Force "$qa\omo\agent","$qa\store" | Out-Null
+Copy-Item "$env:USERPROFILE\.omo\omo.jsonc" "$qa\omo\omo.jsonc"
+$env:OMOSWITCH_OMO_HOME="$qa\omo"; $env:OMOSWITCH_HOME="$qa\store"
+Remove-Item Env:\OMO_CODING_AGENT_DIR -ErrorAction SilentlyContinue
+$cli="src-tauri\target\debug\omoswitch-cli.exe"
+```
+
+| ID | Command | PASS iff |
+|---|---|---|
+| P1 | `cargo test --manifest-path src-tauri\Cargo.toml` | exit 0, ≥85 tests, 0 failed |
+| P2 | `pnpm test` | exit 0, ≥50 tests |
+| P3 | `pnpm build` | exit 0 |
+| P4 | `pnpm e2e` | exit 0, ≥18 passed |
+| P5 | `& $cli providers` | exit 0; `agentDir` = `$qa\omo\agent`; `providers` = `[]`; **`models.json` still absent** (list must not create it) |
+| P6 | `& $cli provider-add --id wawazz-gpt --base-url https://wawazz.xyz/v1 --api openai-completions --model gpt-6-astra --model gpt-6-sol` | exit 0; models.json exists, json5-parses, contains both ids; `disabledProviders` absent or `[]` |
+| P7 | add a comment + a second provider by hand, then `& $cli provider-add --id deepseek --base-url https://api.deepseek.com --api openai-completions --model deepseek-chat` | exit 0; `git diff --no-index` shows changes ONLY inside the `providers` object; the hand-added comment byte-identical; the hand-added provider untouched |
+| P8 | `"TEST-NOT-A-REAL-KEY" \| & $cli provider-key wawazz-gpt --stdin` then `& $cli providers` | exit 0; `hasKey:true`, `keySource:"auth"`; `rg -F "TEST-NOT-A-REAL-KEY" models.json` → 0 matches; present in `auth.json`; 0 matches across both commands' stdout+stderr |
+| P9 | `& $cli provider-disable wawazz-gpt; & $cli providers` | exit 0; `enabled:false`; definition and models still present (no deletion) |
+| P10 | `$env:OMOSWITCH_OMO_AGENT_DIR="$qa\alt-agent"; & $cli providers` | exit 0; `agentDir` = `$qa\alt-agent`; `providers` = `[]`. Then `Remove-Item Env:\OMOSWITCH_OMO_AGENT_DIR` |
+| **P-final** | **After explicit user OK only.** Back up `~\.omo\agent` if present; clear all `OMOSWITCH_*`; add `wawazz-gpt` via the GUI with its real key; then `omo auth check --provider wawazz-gpt --json` | response no longer says `provider_not_found` (`credentials_not_configured` or `ready` both PASS — the point is the provider resolves). `~\.omo\omo.jsonc` byte-identical throughout. Keep the backup until the user OKs deletion; then remove `$qa`. |
+
+## Phase 2 success criteria
+
+1. P1–P10 PASS with pasted evidence; P-final PASS after user OK.
+2. `omo auth check --provider wawazz-gpt --json` no longer reports `provider_not_found`.
+3. All 19 pre-existing `jsonc_edit` and 11 `omo_config` tests pass UNMODIFIED after the T1 generalization.
+4. No key material in any log, error message, preview, DOM node, backup filename, models.json, or argv.
+5. Japanese typed into every model-id/name field commits correctly and retains focus.
+6. `pnpm tauri build` still produces `omoswitch.exe` + NSIS + MSI.
+7. 13 commits, one per task, clean tree, tagged `v0.2.0`.
