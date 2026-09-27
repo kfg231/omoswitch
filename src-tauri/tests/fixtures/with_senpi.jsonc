@@ -1,0 +1,4 @@
+{
+  "[senpi]": { "agents": { "legacy": { "model": "prov-a/model-x" } } },
+  "text": "// { [native] \"quoted\"",
+}

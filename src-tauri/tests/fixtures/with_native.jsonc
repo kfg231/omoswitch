@@ -1,0 +1,9 @@
+{
+  "[opencode]": { "agents": { "old": { "model": "prov-a/model-x" } } },
+  "[native]": {
+    // retain this comment
+    "agents": { "old": { "model": "prov-a/model-x" } },
+    "categories": {},
+    "extra": "keep-me",
+  },
+}

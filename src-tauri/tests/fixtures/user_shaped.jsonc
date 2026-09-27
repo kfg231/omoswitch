@@ -1,0 +1,31 @@
+// OMO configuration
+{
+  "$schema": "https://example.invalid/omo.schema.json",
+  "[opencode]": {
+    // agents
+    "agents": {
+      "hephaestus": { "model": "prov-a/model-x", },
+      "oracle": { "model": "prov-a/model-x", "reasoning": "high" },
+      "librarian": { "model": "prov-a/model-x" },
+      "explore": { "model": "prov-a/model-x" },
+      "multimodal-looker": { "model": "prov-a/model-x" },
+      "prometheus": { "model": "prov-a/model-x" },
+      "metis": { "model": "prov-a/model-x" },
+      "momus": { "model": "prov-a/model-x" },
+      "atlas": { "model": "prov-a/model-x" },
+      "sisyphus-junior": { "model": "prov-a/model-x" },
+      "sisyphus": { "model": "prov-a/model-x" },
+    },
+    "categories": {
+      "visual-engineering": { "model": "prov-a/model-x" },
+      "ultrabrain": { "model": "prov-a/model-x" },
+      "deep-low": { "model": "prov-a/model-x" },
+      "artistry": { "model": "prov-a/model-x" },
+      "quick": { "model": "prov-a/model-x" },
+      "unspecified-low": { "model": "prov-a/model-x" },
+      "unspecified-high": { "model": "prov-a/model-x" },
+      "writing": { "model": "prov-a/model-x" },
+    },
+  },
+  "_migrations": ["2026-09-27",],
+}

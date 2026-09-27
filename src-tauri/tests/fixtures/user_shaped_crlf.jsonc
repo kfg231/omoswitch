@@ -1,0 +1,13 @@
+// OMO configuration
+{
+  "$schema": "https://example.invalid/omo.schema.json",
+  "[opencode]": {
+    "agents": {
+      "sisyphus": { "model": "prov-a/model-x", },
+    },
+    "categories": {
+      "quick": { "model": "prov-a/model-x" },
+    },
+  },
+  "_migrations": [],
+}
