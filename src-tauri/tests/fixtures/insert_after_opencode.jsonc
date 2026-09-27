@@ -1,0 +1,10 @@
+// OMO configuration
+{
+  "$schema": "https://example.invalid/omo.schema.json",
+  "[opencode]": { "agents": { "sisyphus": { "model": "prov-a/model-x" } }, "categories": {}, "codegraph": {} },
+  "_migrations": [
+    "2026-07-opencode-config-unification",
+    "2026-08-reasoning-unification",
+    "2026-09-category-deep-split"
+  ]
+}

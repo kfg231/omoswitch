@@ -35,13 +35,17 @@ fn skip(text: &str, mut p: usize) -> Result<usize, AppError> {
                 break;
             }
         }
-        if p >= text.len() { return Ok(p); }
+        if p >= text.len() {
+            return Ok(p);
+        }
         if p < text.len() && text[p..].starts_with("//") {
             p += 2;
             while text.as_bytes().get(p).is_some_and(|b| *b != b'\n') {
                 p += 1;
             }
-            if p >= text.len() { return Ok(p); }
+            if p >= text.len() {
+                return Ok(p);
+            }
             continue;
         }
         if p + 1 < text.len() && text[p..].starts_with("/*") {
@@ -84,7 +88,9 @@ fn value_end(text: &str, start: usize) -> Result<usize, AppError> {
         let mut steps = 0usize;
         while p < text.len() && !stack.is_empty() {
             steps += 1;
-            if steps > text.len().saturating_mul(2) { return Err(malformed(text, p, "value scan made no progress")); }
+            if steps > text.len().saturating_mul(2) {
+                return Err(malformed(text, p, "value scan made no progress"));
+            }
             p = skip(text, p)?;
             if p >= text.len() {
                 break;
@@ -148,7 +154,13 @@ fn object_at(text: &str, start: usize) -> Result<Object, AppError> {
     let mut steps = 0usize;
     loop {
         steps += 1;
-        if steps > text.len().saturating_mul(2) { return Err(malformed(text, p, format!("object scan made no progress at byte {p}"))); }
+        if steps > text.len().saturating_mul(2) {
+            return Err(malformed(
+                text,
+                p,
+                format!("object scan made no progress at byte {p}"),
+            ));
+        }
         p = skip(text, p)?;
         if p >= text.len() {
             return Err(malformed(text, p, "unterminated object"));
@@ -222,12 +234,17 @@ fn root_and_native(text: &str) -> Result<(Value, Object, Option<Object>), AppErr
 pub fn parse_value(text: &str) -> Result<Value, AppError> {
     json5::from_str(text).map_err(|error| {
         let (line, col) = match error {
-            json5::Error::Message { location: Some(ref location), .. } => {
-                (location.line, location.column)
-            }
+            json5::Error::Message {
+                location: Some(ref location),
+                ..
+            } => (location.line, location.column),
             json5::Error::Message { location: None, .. } => (1, 1),
         };
-        AppError::MalformedJsonc { message: error.to_string(), line, col }
+        AppError::MalformedJsonc {
+            message: error.to_string(),
+            line,
+            col,
+        }
     })
 }
 
@@ -264,6 +281,56 @@ fn pretty(value: &Map<String, Value>, newline: &str) -> String {
         .replace('\n', newline)
 }
 
+fn line_indent(text: &str, at: usize) -> String {
+    let line_start = text[..at].rfind('\n').map_or(0, |index| index + 1);
+    text[line_start..at]
+        .chars()
+        .take_while(|character| *character == ' ' || *character == '\t')
+        .collect()
+}
+
+fn indent_unit(text: &str, root: &Object) -> String {
+    root.members.first().map_or_else(
+        || "  ".into(),
+        |member| line_indent(text, member.value_start),
+    )
+}
+
+fn reindent(value: &Map<String, Value>, newline: &str, unit: &str, base: &str) -> String {
+    pretty(value, newline)
+        .split(newline)
+        .enumerate()
+        .map(|(line, content)| {
+            if line == 0 {
+                content.to_owned()
+            } else {
+                let level = content.bytes().take_while(|byte| *byte == b' ').count() / 2;
+                format!("{}{}", base, unit.repeat(level) + content.trim_start())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(newline)
+}
+
+fn has_comma_after(text: &str, at: usize) -> bool {
+    skip(text, at).is_ok_and(|position| text.as_bytes().get(position) == Some(&b','))
+}
+
+fn native_member(
+    agents: &Map<String, Value>,
+    categories: &Map<String, Value>,
+    newline: &str,
+    unit: &str,
+    member_indent: &str,
+) -> String {
+    let child_indent = format!("{member_indent}{unit}");
+    let agents_text = reindent(agents, newline, unit, &child_indent);
+    let categories_text = reindent(categories, newline, unit, &child_indent);
+    format!(
+        "\"[native]\": {{{newline}{child_indent}\"agents\": {agents_text},{newline}{child_indent}\"categories\": {categories_text}{newline}{member_indent}}}"
+    )
+}
+
 pub fn set_native_subtrees(
     text: &str,
     agents: &Map<String, Value>,
@@ -271,6 +338,7 @@ pub fn set_native_subtrees(
 ) -> Result<String, AppError> {
     let (mut expected, root, native) = root_and_native(text)?;
     let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let unit = indent_unit(text, &root);
     let root_obj = expected
         .as_object_mut()
         .ok_or_else(|| AppError::NotAnObject {
@@ -290,26 +358,94 @@ pub fn set_native_subtrees(
     if let Some(native_obj_spans) = native {
         for (key, map) in [("agents", agents), ("categories", categories)] {
             if let Some(member) = native_obj_spans.members.iter().find(|m| m.key == key) {
-                edits.push((member.value_start, member.value_end, pretty(map, newline)));
+                let member_indent = line_indent(text, member.value_start);
+                edits.push((
+                    member.value_start,
+                    member.value_end,
+                    reindent(map, newline, &unit, &member_indent),
+                ));
             } else {
+                let member_indent = native_obj_spans.members.first().map_or_else(
+                    || format!("{unit}{unit}"),
+                    |member| line_indent(text, member.value_start),
+                );
+                let comma = native_obj_spans
+                    .members
+                    .last()
+                    .is_some_and(|member| has_comma_after(text, member.value_end));
+                let separator = if native_obj_spans.members.is_empty() || comma {
+                    ""
+                } else {
+                    ","
+                };
                 edits.push((
                     native_obj_spans.end - 1,
                     native_obj_spans.end - 1,
-                    format!("{newline}  \"{key}\": {},", pretty(map, newline)),
+                    format!(
+                        "{separator}{newline}{member_indent}\"{key}\": {}{}",
+                        reindent(map, newline, &unit, &member_indent),
+                        if comma { "," } else { "" }
+                    ),
                 ));
             }
         }
     } else {
-        let indent = "  ";
-        let insertion = format!("{newline}{indent}\"[native]\": {{{newline}{indent}{indent}\"agents\": {},{newline}{indent}{indent}\"categories\": {}{newline}{indent}}},{newline}", pretty(agents, newline), pretty(categories, newline));
-        edits.push((root.end - 1, root.end - 1, insertion));
+        let member_indent = root
+            .members
+            .first()
+            .map_or_else(String::new, |member| line_indent(text, member.value_start));
+        let member = native_member(agents, categories, newline, &unit, &member_indent);
+        if let Some(opencode) = root
+            .members
+            .iter()
+            .find(|member| member.key == "[opencode]")
+        {
+            let comma = skip(text, opencode.value_end)
+                .ok()
+                .and_then(|position| text.as_bytes().get(position))
+                .is_some_and(|byte| *byte == b',');
+            let insertion_at = skip(text, opencode.value_end)
+                .map(|position| position + usize::from(comma))
+                .map_err(|_| malformed(text, opencode.value_end, "invalid member separator"))?;
+            edits.push((
+                insertion_at,
+                insertion_at,
+                format!(
+                    "{}{newline}{member_indent}{member}{}",
+                    if comma { "" } else { "," },
+                    if comma { "," } else { "" }
+                ),
+            ));
+        } else if let Some(last) = root.members.last() {
+            if has_comma_after(text, last.value_end) {
+                edits.push((
+                    root.end - 1,
+                    root.end - 1,
+                    format!("{member_indent}{member},{newline}"),
+                ));
+            } else {
+                edits.push((
+                    last.value_end,
+                    last.value_end,
+                    format!(",{newline}{member_indent}{member}"),
+                ));
+            }
+        } else {
+            edits.push((
+                root.end - 1,
+                root.end - 1,
+                format!("{newline}{member_indent}{member}{newline}"),
+            ));
+        }
     }
     edits.sort_by(|a, b| b.0.cmp(&a.0));
     let mut result = text.to_owned();
     for (start, end, replacement) in edits {
         result.replace_range(start..end, &replacement);
     }
-    let reparsed = parse_value(&result).map_err(|error| AppError::VerifyFailed { message: format!("{error}; generated={result}"), })?;
+    let reparsed = parse_value(&result).map_err(|error| AppError::VerifyFailed {
+        message: format!("{error}; generated={result}"),
+    })?;
     if reparsed != expected {
         return Err(AppError::VerifyFailed {
             message: "edited JSONC did not match expected value".into(),
@@ -355,6 +491,10 @@ mod tests {
                 env!("CARGO_MANIFEST_DIR"),
                 "/tests/fixtures/empty_object.jsonc"
             )),
+            "insert-after-opencode" => include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/insert_after_opencode.jsonc"
+            )),
             _ => unreachable!(),
         }
     }
@@ -386,7 +526,8 @@ mod tests {
     #[test]
     fn insert_native() {
         let (a, c) = maps();
-        let out = set_native_subtrees(fixture("user"), &a, &c).unwrap_or_else(|error| panic!("{error:?}"));
+        let out = set_native_subtrees(fixture("user"), &a, &c)
+            .unwrap_or_else(|error| panic!("{error:?}"));
         assert!(has_key(&out, "[native]").unwrap());
     }
     #[test]
@@ -420,12 +561,18 @@ mod tests {
     #[test]
     fn duplicate_native_rejected() {
         let result = has_key(fixture("dup-native"), "x");
-        assert!(matches!(&result, Err(AppError::DuplicateKey { key, .. }) if key == "[native]"), "got {result:?}");
+        assert!(
+            matches!(&result, Err(AppError::DuplicateKey { key, .. }) if key == "[native]"),
+            "got {result:?}"
+        );
     }
     #[test]
     fn duplicate_agents_rejected() {
         let result = native_subtrees(fixture("dup-agents"));
-        assert!(matches!(&result, Err(AppError::DuplicateKey { key, .. }) if key == "agents"), "got {result:?}");
+        assert!(
+            matches!(&result, Err(AppError::DuplicateKey { key, .. }) if key == "agents"),
+            "got {result:?}"
+        );
     }
     #[test]
     fn malformed_reports_error() {
@@ -443,6 +590,53 @@ mod tests {
     fn strings_do_not_confuse_scanner() {
         let (a, c) = maps();
         assert!(set_native_subtrees(fixture("senpi"), &a, &c).is_ok());
+    }
+
+    #[test]
+    fn insert_after_opencode_is_valid_and_preserves_migrations() {
+        let (a, c) = maps();
+        let old = fixture("insert-after-opencode");
+        let out = set_native_subtrees(old, &a, &c).unwrap();
+        assert!(parse_value(&out).is_ok());
+        let opencode_end = out.find("\"[opencode]\"").unwrap();
+        let native_start = out.find("\"[native]\"").unwrap();
+        let migrations_start = out.find("\"_migrations\"").unwrap();
+        assert!(opencode_end < native_start && native_start < migrations_start);
+        assert_eq!(
+            &out[out.find("\"_migrations\"").unwrap()..],
+            &old[old.find("\"_migrations\"").unwrap()..]
+        );
+    }
+
+    #[test]
+    fn append_native_without_opencode_has_no_trailing_comma() {
+        let (a, c) = maps();
+        let old = "{\n  \"other\": 1\n}\n";
+        let out = set_native_subtrees(old, &a, &c).unwrap();
+        assert!(parse_value(&out).is_ok());
+        assert!(!out.contains("\"categories\": {},\n  }"));
+        assert!(out.contains("\"[native]\": {\n"));
+    }
+
+    #[test]
+    fn inserted_native_uses_document_indent_and_trailing_comma_style() {
+        let (a, c) = maps();
+        let no_trailing = set_native_subtrees(fixture("insert-after-opencode"), &a, &c).unwrap();
+        assert!(no_trailing.contains("\n    \"agents\": {\n      \"sisyphus\""));
+        assert!(!no_trailing.contains("\n  },\n}"));
+
+        let trailing = set_native_subtrees(fixture("user"), &a, &c).unwrap();
+        assert!(parse_value(&trailing).is_ok());
+        assert!(trailing.contains("\n  },\n  \"_migrations\""));
+    }
+
+    #[test]
+    fn insert_after_opencode_preserves_crlf() {
+        let (a, c) = maps();
+        let old = fixture("insert-after-opencode").replace('\n', "\r\n");
+        let out = set_native_subtrees(&old, &a, &c).unwrap();
+        assert!(!out.replace("\r\n", "").contains('\n'));
+        assert!(parse_value(&out).is_ok());
     }
     #[test]
     fn native_round_trip_maps() {

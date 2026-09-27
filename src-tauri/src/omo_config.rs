@@ -624,15 +624,13 @@ mod tests {
         assert!(result.changed);
         assert!(result.backup_path.is_some());
         let after = load(&paths).unwrap().text;
-        let after_opencode = after
-            .split_once("\"[opencode]\"")
-            .unwrap()
-            .1
-            .split_once("\"_migrations\"")
-            .unwrap()
-            .0
-            .to_owned();
-        assert_eq!(opencode, after_opencode);
+        // Not assert_eq: `[native]` is inserted right after `[opencode]`, so the slice up to
+        // `_migrations` grows by design; the invariant is that the `[opencode]` bytes survive.
+        assert!(
+            after.contains(&opencode),
+            "[opencode] bytes were modified by apply"
+        );
+        assert!(after.contains("\"[native]\""));
         assert_eq!(list_backups(&paths).unwrap().len(), 1);
     }
 
