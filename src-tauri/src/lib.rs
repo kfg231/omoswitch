@@ -1,9 +1,12 @@
+pub mod auth;
 pub mod commands;
 pub mod error;
 pub mod jsonc_edit;
 pub mod models;
+pub mod net;
 pub mod omo_config;
 pub mod paths;
+pub mod providers;
 pub mod store;
 pub mod tray;
 

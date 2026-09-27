@@ -25,6 +25,7 @@ tauri-runtime = "=2.8.0"
 tauri-runtime-wry = { version = "=2.8.0", default-features = false }
 tauri-utils = "=2.8.0"
 tauri-plugin-single-instance = "=2.3.0"
+ureq = { version = "=3.4.2", default-features = false, features = ["rustls"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = { version = "=1.0.145", features = ["preserve_order"] }
 json5 = "=0.4.1"

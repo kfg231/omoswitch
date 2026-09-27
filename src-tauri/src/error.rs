@@ -32,4 +32,12 @@ pub enum AppError {
     InvalidProfile { message: String, field: String },
     #[error("expected an object: {message}")]
     NotAnObject { message: String },
+    #[error("provider was not found: {message}")]
+    ProviderNotFound { message: String },
+    #[error("invalid provider field {field}: {message}")]
+    InvalidProvider { message: String, field: String },
+    #[error("network is unreachable: {message}")]
+    NetworkUnreachable { message: String },
+    #[error("provider models could not be parsed: {message}")]
+    ModelFetchParse { message: String },
 }
