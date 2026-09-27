@@ -256,6 +256,80 @@ File-conflict rule: T1 declared all modules in `lib.rs`. Wave 2/3 tasks edit ONL
 - **T8 commands/tray/CLI (deep-low, [context7-mcp, programming])** — `commands.rs` per contract (store reloaded per call), `lib.rs` single-instance + invoke_handler + hide on close, `tray.rs` checkbox item per profile + Open/Quit (OS-locale label) + tooltip `OmOswitch — <active|none> [drift]`, rebuild after mutations; tray click = apply without hash, error → show window + `omoswitch://error`; `bin/omoswitch-cli.rs`. Accept: cargo build/test green; cli `status` on temp home prints JSON.
 - **T9 E2E + QA + release (unspecified-high, [playwright, visual-qa, debugging, git-master])** — `e2e/app.spec.ts` against `pnpm dev:mock`; run S1–S11; `pnpm tauri dev` tray smoke on temp home; ask user before S12.
 
+## PHASE 2 — Provider & model management (the user's actual headline feature)
+
+The user's priority is CC Switch's core: enter a baseURL + API key, keep several provider configs, switch between
+them. What shipped so far (agent/category assignments) stays, but it is the *secondary* feature.
+
+### Verified locally with omo itself (not inferred)
+
+`omo --list-models` lists 46 provider ids, and **`wawazz-gpt`, `wawazz-gemini`, `coderplan-kiro` are NOT among them.**
+`omo auth check --provider wawazz-gpt --json` returns `{"status":"not_ready","reason":"provider_not_found"}` (exit 1),
+while a known provider returns `credentials_not_configured` instead — so the distinction is real, not a credential gap.
+
+**Consequence: the `[native]` block applied in S12 is a dead reference.** Its assignments point at `wawazz-*` models
+that native cannot resolve, because those providers exist only in `~/.config/opencode/opencode.json`, which native
+reads *only* as an import source during `omo setup`. Provider management is therefore not a nice-to-have; without it
+the model assignments OmOswitch already writes cannot take effect.
+
+`omo setup --help` states the remedy in native's own words:
+
+```
+1 API key for providers omo does not serve (coderplan) - define the provider and its baseUrl in
+  ~/.omo\agent\models.json, then /login <provider> inside omo
+providers  coderplan-kiro -> https://api.coderplan.ai, 1 model (claude-opus-5), key from opencode config apiKey
+           wawazz-gemini  -> https://wawazz.xyz/v1, 1 model (gemini-3.8-flash-high)
+           wawazz-gpt     -> https://wawazz.xyz/v1, 2 models (gpt-6-astra, gpt-6-sol)
+```
+
+Same output independently confirms two things OmOswitch already gets right: native's agents are exactly the 7 in our
+catalog (it enumerates them when rejecting `atlas`/`metis`/`oracle` etc.), and our restored `deep-low` is seen —
+"1 you already set differently in omo (category deep-low) - kept as is".
+
+Also observed: `~/.omo/agent/models.json` does **not** exist yet (nor `models.jsonc`, `settings.jsonc`, `mcp.json`),
+and setup warns `node:sqlite unavailable; database credentials not imported`.
+
+### Target files (from librarian @ e2a1d66, 2026-09-27T14:57Z)
+
+- **`~/.omo/agent/models.json` — the authoritative provider file.** `{ providers: { <id>: { name?, baseUrl?, apiKey?,
+  api?, headers?, authHeader?, compat?, models?: [{ id, name?, reasoning?, input?, contextWindow?, maxTokens?, cost? }],
+  modelOverrides? } }, disabledProviders?: [] }`. `api` is a protocol name, NOT an npm package:
+  `openai-completions` (default) / `openai-responses` / `anthropic-messages`. Engine hot-reloads it (config-watch
+  watches `settings.jsonc`, `settings.json`, `models.json`, `keybindings.json`). Missing file = empty map, not an error.
+- **`~/.omo/agent/auth.json` — credentials**, `{ "<provider-id>": { "type": "api_key", "key": "..." } }` or an `oauth`
+  shape, mode 0600. Precedence: auth.json > inline `apiKey` in models.json > env var. Values support `$VAR`/`${VAR}`
+  expansion and `!command` substitution.
+- Agent dir override env vars: `OMO_CODING_AGENT_DIR`, `SENPI_CODING_AGENT_DIR`, `PI_CODING_AGENT_DIR`.
+- **Must not touch:** `agent/settings.json` (engine rewrites it constantly), `agent/models-store.json` (lock-managed
+  catalog cache), `mcp.json`, `trust.json`.
+- CLI a switcher can lean on: `omo auth check --provider <id> --json`, `omo auth print-api-key --provider <id>`,
+  `omo update --models`, `omo setup --dry-run|--yes`, `omo --list-models`.
+
+### Design decisions for phase 2
+
+1. **Write providers to `~/.omo/agent/models.json`; write keys to `~/.omo/agent/auth.json`** (not inline), so secrets
+   stay in the 0600 file the engine already protects. Offer inline `apiKey` only as an explicit opt-out.
+2. **Additive model, like CC Switch's OpenCode adapter:** all providers coexist in `models.json`; "switching" means
+   enabling/disabling and choosing which models the agent/category assignments point at. Use `disabledProviders` for
+   a disable toggle rather than deleting definitions.
+3. **Reuse the proven core:** the same atomic-write + sha256 changed-on-disk guard + backup + JSONC comment
+   preservation already built for `omo.jsonc`. `models.json` may legally carry comments, so it goes through the same
+   span-splice editor, not `serde_json` round-tripping.
+4. **Import from `opencode.json`** to seed providers (that is where the user's three live today), redacting nothing on
+   read but never echoing keys into logs, previews, or error messages.
+5. **Connectivity test copies CC Switch's design:** a cheap reachability probe, no inference request; 200/401/403/404
+   all count as reachable since the point is network reachability, not auth.
+6. **Model list:** manual table plus a live `GET {baseUrl}/models` fetch with `/v1/models` fallback, parsing both
+   `{data:[{id}]}` and `{models:[{slug}]}`.
+7. **Do NOT shell out to `omo setup --yes`** for the write path: it also rewrites model choices and MCP config, which
+   is far wider than a provider switcher should do. Use it only as a read-only reference via `--dry-run`.
+
+### Known trap (CC Switch fixed this; we must too)
+
+IME composition: binding a model-id input straight to parent state and keying rows by model id unmounts the input on
+Japanese IME commit and drops focus. CC Switch solves it with a local-state `ImeSafeInput` committing on blur. The
+user types Japanese, so this is mandatory, not optional.
+
 ## Re-verified against latest dev (6c9e0aa, 2026-09-27T14:16Z)
 
 Re-checked all five catalog lists against the default branch `dev` at `6c9e0aa4d20bb2d84b3e528693097210a30c9757`,
