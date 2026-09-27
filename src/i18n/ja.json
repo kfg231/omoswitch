@@ -78,7 +78,17 @@
     "extra": "その他の設定 (JSON)",
     "extraInvalid": "JSON として解析できません",
     "removeEntry": "この項目を削除",
-    "unsaved": "保存されていない変更があります"
+    "unsaved": "保存されていない変更があります",
+    "keyPlaceholder": "キー名",
+    "noAgents": "エージェントの割り当てはまだありません",
+    "noCategories": "カテゴリの割り当てはまだありません",
+    "extraPlaceholder": "{ \"temperature\": 0.2 }",
+    "addFallback": "フォールバックを追加",
+    "fallbackPlaceholder": "provider/model",
+    "removeFallback": "フォールバック「{{model}}」を取り除く",
+    "suggestions": "候補",
+    "saved": "プロファイルを保存しました",
+    "emptySelection": "左の一覧からプロファイルを選択してください"
   },
   "modelPicker": {
     "title": "モデルを選択",
@@ -115,6 +125,7 @@
     "applied": "適用しました",
     "appliedNoChange": "変更がないため書き込みませんでした",
     "backupCreated": "バックアップ: {{path}}",
+    "appliedWithBackup": "適用しました（バックアップ: {{path}}）",
     "reload": "プレビューを再読み込み"
   },
   "import": {

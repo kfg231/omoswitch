@@ -78,7 +78,17 @@
     "extra": "Extra settings (JSON)",
     "extraInvalid": "Not valid JSON",
     "removeEntry": "Remove this entry",
-    "unsaved": "You have unsaved changes"
+    "unsaved": "You have unsaved changes",
+    "keyPlaceholder": "Key name",
+    "noAgents": "No agent assignments yet",
+    "noCategories": "No category assignments yet",
+    "extraPlaceholder": "{ \"temperature\": 0.2 }",
+    "addFallback": "Add fallback",
+    "fallbackPlaceholder": "provider/model",
+    "removeFallback": "Remove fallback \"{{model}}\"",
+    "suggestions": "Suggestions",
+    "saved": "Profile saved",
+    "emptySelection": "Select a profile from the list on the left"
   },
   "modelPicker": {
     "title": "Pick a model",
@@ -115,6 +125,7 @@
     "applied": "Applied",
     "appliedNoChange": "Nothing written because nothing changed",
     "backupCreated": "Backup: {{path}}",
+    "appliedWithBackup": "Applied (backup: {{path}})",
     "reload": "Reload preview"
   },
   "import": {
