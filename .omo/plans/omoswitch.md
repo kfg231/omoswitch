@@ -256,6 +256,27 @@ File-conflict rule: T1 declared all modules in `lib.rs`. Wave 2/3 tasks edit ONL
 - **T8 commands/tray/CLI (deep-low, [context7-mcp, programming])** — `commands.rs` per contract (store reloaded per call), `lib.rs` single-instance + invoke_handler + hide on close, `tray.rs` checkbox item per profile + Open/Quit (OS-locale label) + tooltip `OmOswitch — <active|none> [drift]`, rebuild after mutations; tray click = apply without hash, error → show window + `omoswitch://error`; `bin/omoswitch-cli.rs`. Accept: cargo build/test green; cli `status` on temp home prints JSON.
 - **T9 E2E + QA + release (unspecified-high, [playwright, visual-qa, debugging, git-master])** — `e2e/app.spec.ts` against `pnpm dev:mock`; run S1–S11; `pnpm tauri dev` tray smoke on temp home; ask user before S12.
 
+## Re-verified against latest dev (6c9e0aa, 2026-09-27T14:16Z)
+
+Re-checked all five catalog lists against the default branch `dev` at `6c9e0aa4d20bb2d84b3e528693097210a30c9757`,
+which is newer than tag v5.0.1 (`ab725f3`). **No change** — the 7 native agents, 10 categories, 8 reasoning levels,
+the legacy agent/category/harness aliases, and the OpenCode-only drop list are all identical to what
+`src/lib/catalog.ts` and `src-tauri/src/store.rs` already ship. Commits after v5.0.1 touched the computer-use engine
+and Windows doctor fixes only. Native still has no main-session agent (no `sisyphus`/`build` equivalent); it runs the
+top-level default model. Repo is not renamed or archived; npm names stay `omo-ai` (native) and `oh-my-opencode` (plugin).
+
+Two migration ids exist after `2026-09-category-deep-split`
+(`packages/omo-opencode/src/config-migration/migration-plans.ts`), both conditional — they only run and only get
+recorded in `_migrations` when the legacy keys are actually present:
+- `2026-09-harness-native-rename` — rewrites a `[senpi]` block to `[native]`.
+- `2026-09-subscription-provider-rename` — `claude-sdk-oauth` -> `anthropic-subscription`,
+  `openai-codex` -> `chatgpt-subscription`.
+
+Neither affects OmOswitch's write path: it only ever writes `[native].agents` / `[native].categories`, already reports
+`legacySenpiPresent` for a `[senpi]` block, and never rewrites provider ids. A `computer` settings block was added to
+the `[native]` schema upstream; it is not an agent/category field and OmOswitch leaves it untouched like every other
+`[native]` key.
+
 ## CORRECTION: native agent/category registry (verified at tag v5.0.1, ab725f3)
 
 The catalog shipped in T5 was taken from the OpenCode edition and is WRONG for native. Authoritative sources: `packages/senpi-task/src/agents/builtin/index.ts#L14-L44`, `packages/omo-native/bin/lib/setup-opencode-models.js#L19-L27`, `packages/senpi-task/src/category/{builtins,google-categories,openai-categories,anthropic-categories,kimi-categories}.ts`, `packages/omo-config-core/src/schema/reasoning-vocabulary.ts#L1-L23`.
