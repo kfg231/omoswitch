@@ -273,6 +273,23 @@ The catalog shipped in T5 was taken from the OpenCode edition and is WRONG for n
 - **T7b (`src/lib/catalog.ts`, visual-engineering):** replace KNOWN_AGENTS with the 7 native names, drop `none` from REASONING_LEVELS, add `LEGACY_AGENT_ALIASES` / `LEGACY_CATEGORY_ALIASES`, and surface a "not recognized by native" marker in `AssignmentRow`. Update `mockData.ts` seeds and any i18n keys; `pnpm test` + `pnpm build` must stay green.
 - **T8b (`src-tauri/src/store.rs`, deep-low):** on `[opencode]` import, after renaming `metis`/`momus`, DROP agent keys outside the 7 native names and report them as `dropped` alongside `renamed` (contract change: `ImportResult.dropped: string[]`, mirrored in `types.ts` and the mock). Map category `deep`→`deep-low`. Add tests: importing the user-shaped `[opencode]` block yields exactly `plan-consultant`, `plan-reviewer` (renamed) and drops the 9 OpenCode-only agents.
 
+## Concurrent writer: CC Switch (observed, not hypothetical)
+
+CC Switch v3.20.4 is installed on this machine and actively writes the same file. Its own log recorded
+`[2026-09-27][18:54:08][INFO][cc_switch_lib::services::omo] OMO config written to "C:\Users\tom\.omo\omo.jsonc"`,
+and that write silently dropped the `deep-low` category from `[opencode].categories` (2416 -> 2373 bytes) — its OmO
+adapter carries a pre-`2026-09-category-deep-split` category list and rewrites the whole `[opencode]` block from its
+own SQLite DB. It made no backup of the file it replaced.
+
+Consequences for OmOswitch:
+- The changed-on-disk sha256 guard (`expectedHash` + re-read before replace) is not defensive over-engineering; a
+  second writer demonstrably exists. Keep `changedOnDisk` surfaced in the UI with a reload-preview action.
+- OmOswitch owns ONLY `[native].agents` / `[native].categories`. It must never widen that to `[opencode]`, or the two
+  apps would fight over the same bytes.
+- CC Switch's writes target `[opencode]` only, so a `[native]` block should survive them — but this is an observation
+  about its current version, not a guarantee. S12 must re-read the file immediately before applying.
+- Do not run CC Switch's OmO provider switch while OmOswitch is mid-apply.
+
 ## Scenario Contract
 
 QA env (S5–S10 never touch real `~/.omo`; S6 reads it only as diff baseline):
