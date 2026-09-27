@@ -13,6 +13,29 @@ use uuid::Uuid;
 
 pub type Assignment = Map<String, Value>;
 
+const NATIVE_AGENTS: &[&str] = &[
+    "explore",
+    "librarian",
+    "plan-consultant",
+    "plan-reviewer",
+    "omo-native-code-reviewer",
+    "omo-native-qa-executor",
+    "omo-native-gate-reviewer",
+];
+
+const NATIVE_CATEGORIES: &[&str] = &[
+    "visual-engineering",
+    "ultrabrain",
+    "deep-low",
+    "deep-high",
+    "artistry",
+    "quick",
+    "architect",
+    "unspecified-low",
+    "unspecified-high",
+    "writing",
+];
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
@@ -41,6 +64,7 @@ pub struct ProfileInput {
 pub struct ImportResult {
     pub profile: Profile,
     pub renamed: Vec<(String, String)>,
+    pub dropped: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -188,10 +212,14 @@ impl Store {
             })?),
             None => None,
         };
-        let (agents, renamed_agents) =
-            import_map(section.and_then(|value| value.get("agents")), source)?;
-        let (categories, renamed_categories) =
-            import_map(section.and_then(|value| value.get("categories")), source)?;
+        let (agents, renamed_agents, mut dropped) =
+            import_map(section.and_then(|value| value.get("agents")), source, true)?;
+        let (categories, renamed_categories, dropped_categories) = import_map(
+            section.and_then(|value| value.get("categories")),
+            source,
+            false,
+        )?;
+        dropped.extend(dropped_categories);
         let now = timestamp();
         let profile = Profile {
             id: Uuid::new_v4().to_string(),
@@ -202,12 +230,14 @@ impl Store {
             created_at: now.clone(),
             updated_at: now,
         };
+        dropped.sort();
         Ok(ImportResult {
             profile,
             renamed: renamed_agents
                 .into_iter()
                 .chain(renamed_categories)
                 .collect(),
+            dropped,
         })
     }
 
@@ -260,27 +290,45 @@ fn canonical(value: &Value) -> Value {
 fn import_map(
     value: Option<&Value>,
     source: ImportSource,
-) -> Result<(Map<String, Value>, Vec<(String, String)>), AppError> {
+    filter_agents: bool,
+) -> Result<(Map<String, Value>, Vec<(String, String)>, Vec<String>), AppError> {
     let Some(value) = value else {
-        return Ok((Map::new(), Vec::new()));
+        return Ok((Map::new(), Vec::new(), Vec::new()));
     };
     let object = value.as_object().ok_or_else(|| AppError::NotAnObject {
         message: "agents or categories".to_owned(),
     })?;
     let mut result = Map::new();
     let mut renamed = Vec::new();
+    let mut dropped = Vec::new();
     for (key, assignment) in object {
         let target = match (source, key.as_str()) {
-            (ImportSource::Opencode, "metis") => "plan-consultant",
-            (ImportSource::Opencode, "momus") => "plan-reviewer",
+            (ImportSource::Opencode, "metis") if filter_agents => "plan-consultant",
+            (ImportSource::Opencode, "momus") if filter_agents => "plan-reviewer",
+            (_, "omo-senpi-code-reviewer") if filter_agents => "omo-native-code-reviewer",
+            (_, "omo-senpi-gate-reviewer") if filter_agents => "omo-native-gate-reviewer",
+            (_, "omo-senpi-qa-executor") if filter_agents => "omo-native-qa-executor",
+            (_, "deep") if !filter_agents && NATIVE_CATEGORIES.contains(&"deep-low") => "deep-low",
             _ => key,
         };
+        if target != key && object.contains_key(target) {
+            dropped.push(key.clone());
+            continue;
+        }
+        if filter_agents && !NATIVE_AGENTS.contains(&target) {
+            dropped.push(key.clone());
+            continue;
+        }
+        if result.contains_key(target) {
+            dropped.push(key.clone());
+            continue;
+        }
         if target != key {
             renamed.push((key.clone(), target.to_owned()));
         }
         result.insert(target.to_owned(), assignment.clone());
     }
-    Ok((result, renamed))
+    Ok((result, renamed, dropped))
 }
 
 fn validate_input(
@@ -442,14 +490,122 @@ mod tests {
             .expect("import");
         assert!(result.profile.agents.contains_key("plan-consultant"));
         assert_eq!(result.renamed.len(), 2);
+        assert!(result.dropped.is_empty());
     }
     #[test]
-    fn native_import_does_not_rename() {
+    fn native_import_drops_metis_without_renaming() {
         let config = serde_json::json!({"[native]":{"agents":{"metis":{"model":"p/m"}}}});
         let result = Store::import_profile(&config, ImportSource::Native, "Imported".to_owned())
             .expect("import");
-        assert!(result.profile.agents.contains_key("metis"));
+        assert!(result.profile.agents.is_empty());
         assert!(result.renamed.is_empty());
+        assert_eq!(result.dropped, vec!["metis"]);
+    }
+    #[test]
+    fn opencode_import_keeps_native_agents_and_reports_sorted_drops() {
+        let config = serde_json::json!({
+            "[opencode]": {
+                "agents": {
+                    "hephaestus": {"model":"p/a"},
+                    "oracle": {"model":"p/b"},
+                    "librarian": {"model":"p/c"},
+                    "explore": {"model":"p/d"},
+                    "multimodal-looker": {"model":"p/e"},
+                    "prometheus": {"model":"p/f"},
+                    "metis": {"model":"p/g"},
+                    "momus": {"model":"p/h"},
+                    "atlas": {"model":"p/i"},
+                    "sisyphus-junior": {"model":"p/j"},
+                    "sisyphus": {"model":"p/k"}
+                },
+                "categories": {
+                    "visual-engineering": {"model":"p/a"},
+                    "ultrabrain": {"model":"p/b"},
+                    "deep": {"model":"p/c"},
+                    "artistry": {"model":"p/d"},
+                    "quick": {"model":"p/e"},
+                    "architect": {"model":"p/f"},
+                    "unspecified-low": {"model":"p/g"},
+                    "writing": {"model":"p/h"}
+                }
+            }
+        });
+        let result = Store::import_profile(&config, ImportSource::Opencode, "Imported".to_owned())
+            .expect("import");
+        let agents: Vec<_> = result.profile.agents.keys().cloned().collect();
+        assert_eq!(
+            agents,
+            vec!["librarian", "explore", "plan-consultant", "plan-reviewer"]
+        );
+        assert_eq!(
+            result.dropped,
+            vec![
+                "atlas",
+                "hephaestus",
+                "multimodal-looker",
+                "oracle",
+                "prometheus",
+                "sisyphus",
+                "sisyphus-junior"
+            ]
+        );
+        assert_eq!(
+            result.renamed,
+            vec![
+                ("metis".to_owned(), "plan-consultant".to_owned()),
+                ("momus".to_owned(), "plan-reviewer".to_owned()),
+                ("deep".to_owned(), "deep-low".to_owned())
+            ]
+        );
+    }
+    #[test]
+    fn opencode_import_keeps_all_categories_and_maps_deep() {
+        let config = serde_json::json!({
+            "[opencode]": {"categories": {
+                "visual-engineering": {}, "ultrabrain": {}, "deep": {}, "artistry": {},
+                "quick": {}, "architect": {}, "unspecified-low": {}, "writing": {}
+            }}
+        });
+        let result = Store::import_profile(&config, ImportSource::Opencode, "Imported".to_owned())
+            .expect("import");
+        assert_eq!(result.profile.categories.len(), 8);
+        assert!(!result.profile.categories.contains_key("deep"));
+        assert!(result.profile.categories.contains_key("deep-low"));
+        assert!(result.dropped.is_empty());
+    }
+    #[test]
+    fn legacy_native_agent_is_renamed_not_dropped() {
+        let config = serde_json::json!({
+            "[native]": {"agents": {"omo-senpi-qa-executor": {"model":"p/m"}}}
+        });
+        let result = Store::import_profile(&config, ImportSource::Native, "Imported".to_owned())
+            .expect("import");
+        assert!(result.profile.agents.contains_key("omo-native-qa-executor"));
+        assert_eq!(
+            result.renamed,
+            vec![(
+                "omo-senpi-qa-executor".to_owned(),
+                "omo-native-qa-executor".to_owned()
+            )]
+        );
+        assert!(result.dropped.is_empty());
+    }
+    #[test]
+    fn rename_collision_keeps_existing_and_drops_source() {
+        let config = serde_json::json!({
+            "[opencode]": {"agents": {
+                "plan-consultant": {"model":"p/existing"},
+                "metis": {"model":"p/renamed"}
+            }}
+        });
+        let result = Store::import_profile(&config, ImportSource::Opencode, "Imported".to_owned())
+            .expect("import");
+        assert_eq!(
+            result.profile.agents["plan-consultant"]["model"],
+            "p/existing"
+        );
+        assert!(result.renamed.is_empty());
+        assert_eq!(result.dropped, vec!["metis"]);
     }
     #[test]
     fn non_object_import_is_rejected() {
