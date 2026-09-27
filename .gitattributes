@@ -1,0 +1,4 @@
+* text=auto eol=lf
+
+# CRLF fixtures must keep their bytes: jsonc_edit tests assert newline preservation.
+src-tauri/tests/fixtures/*_crlf.jsonc -text

@@ -7,7 +7,11 @@ pub enum AppError {
     #[error("configuration file is missing: {message}")]
     ConfigMissing { message: String },
     #[error("malformed JSONC at {line}:{col}: {message}")]
-    MalformedJsonc { message: String, line: usize, col: usize },
+    MalformedJsonc {
+        message: String,
+        line: usize,
+        col: usize,
+    },
     #[error("duplicate key {key}: {message}")]
     DuplicateKey { message: String, key: String },
     #[error("configuration changed on disk: {message}")]

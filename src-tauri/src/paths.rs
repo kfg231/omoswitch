@@ -29,10 +29,16 @@ impl Paths {
         let omo_bin = lookup("OMOSWITCH_OMO_BIN")
             .and_then(|value| value.into_string().ok())
             .unwrap_or_else(|| "omo".to_owned());
-        Self { omo_home, store_home, omo_bin }
+        Self {
+            omo_home,
+            store_home,
+            omo_bin,
+        }
     }
 
-    pub fn config_path(&self) -> PathBuf { self.omo_home.join("omo.jsonc") }
+    pub fn config_path(&self) -> PathBuf {
+        self.omo_home.join("omo.jsonc")
+    }
 }
 
 #[cfg(test)]
@@ -42,7 +48,8 @@ mod tests {
 
     #[test]
     fn resolves_defaults_without_overrides() {
-        let values = HashMap::from([(String::from("USERPROFILE"), OsString::from("C:/Users/test"))]);
+        let values =
+            HashMap::from([(String::from("USERPROFILE"), OsString::from("C:/Users/test"))]);
         let paths = Paths::resolve_with(|key| values.get(key).cloned());
         assert_eq!(paths.omo_home, PathBuf::from("C:/Users/test/.omo"));
         assert_eq!(paths.store_home, PathBuf::from("C:/Users/test/.omoswitch"));
@@ -55,7 +62,10 @@ mod tests {
             (String::from("USERPROFILE"), OsString::from("C:/Users/test")),
             (String::from("OMOSWITCH_OMO_HOME"), OsString::from("D:/omo")),
             (String::from("OMOSWITCH_HOME"), OsString::from("D:/store")),
-            (String::from("OMOSWITCH_OMO_BIN"), OsString::from("fake-omo")),
+            (
+                String::from("OMOSWITCH_OMO_BIN"),
+                OsString::from("fake-omo"),
+            ),
         ]);
         let paths = Paths::resolve_with(|key| values.get(key).cloned());
         assert_eq!(paths.omo_home, PathBuf::from("D:/omo"));
