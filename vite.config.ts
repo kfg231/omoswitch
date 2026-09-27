@@ -6,5 +6,10 @@ import { defineConfig as defineVitestConfig } from "vitest/config";
 export default defineVitestConfig({
   plugins: [react(), tailwindcss()],
   server: { port: 1420, strictPort: true },
-  test: { environment: "jsdom", globals: true },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    exclude: ["e2e/**", "node_modules/**"],
+  },
 });
