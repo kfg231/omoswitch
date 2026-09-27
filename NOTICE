@@ -1,0 +1,2 @@
+OmOswitch includes an implementation pattern inspired by CC Switch by farion1231
+(MIT License), specifically its atomic configuration write and changed-on-disk guard.
