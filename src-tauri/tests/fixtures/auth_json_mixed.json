@@ -1,0 +1,14 @@
+{
+  "api-provider": {
+    "type": "api_key",
+    "key": "TEST-NOT-A-REAL-KEY",
+    "label": "fixture api entry"
+  },
+  "oauth-provider": {
+    "type": "oauth",
+    "account": "fixture-oauth-account",
+    "metadata": {
+      "source": "fixture"
+    }
+  }
+}
