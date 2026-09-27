@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { KNOWN_AGENTS, KNOWN_CATEGORIES, REASONING_LEVELS } from "../lib/catalog";
+import {
+  KNOWN_AGENTS,
+  KNOWN_CATEGORIES,
+  LEGACY_AGENT_ALIASES,
+  LEGACY_CATEGORY_ALIASES,
+  REASONING_LEVELS,
+  isNativeAgent,
+  isNativeCategory,
+} from "../lib/catalog";
 import en from "./en.json";
 import ja from "./ja.json";
 
@@ -56,6 +64,12 @@ describe("locale parity", () => {
       "modelPicker.title",
       "preview.title",
       "import.renamedNotice",
+      "import.droppedNotice",
+      "editor.unknownKeyBadge",
+      "editor.unknownAgentHint",
+      "editor.unknownCategoryHint",
+      "editor.legacyKeyBadge",
+      "editor.legacyKeyHint",
       "backups.title",
       "lang.toggle",
       "common.save",
@@ -75,11 +89,46 @@ describe("locale parity", () => {
 });
 
 describe("catalog", () => {
-  it("lists 11 agents and 10 categories with unique names", () => {
-    expect(KNOWN_AGENTS).toHaveLength(11);
+  it("lists the seven native agents and 10 categories with unique names", () => {
+    expect(KNOWN_AGENTS).toEqual([
+      "explore",
+      "librarian",
+      "plan-consultant",
+      "plan-reviewer",
+      "omo-native-code-reviewer",
+      "omo-native-qa-executor",
+      "omo-native-gate-reviewer",
+    ]);
     expect(KNOWN_CATEGORIES).toHaveLength(10);
-    expect(new Set(KNOWN_AGENTS).size).toBe(11);
+    expect(new Set(KNOWN_AGENTS).size).toBe(7);
     expect(new Set(KNOWN_CATEGORIES).size).toBe(10);
+  });
+
+  it("excludes the OpenCode-only agent names native cannot resolve", () => {
+    for (const opencodeOnly of [
+      "sisyphus",
+      "hephaestus",
+      "prometheus",
+      "atlas",
+      "oracle",
+      "multimodal-looker",
+      "sisyphus-junior",
+    ]) {
+      expect(isNativeAgent(opencodeOnly)).toBe(false);
+    }
+  });
+
+  it("maps legacy names to their canonical native keys", () => {
+    expect(LEGACY_AGENT_ALIASES["omo-senpi-qa-executor"]).toBe("omo-native-qa-executor");
+    expect(LEGACY_AGENT_ALIASES["metis"]).toBe("plan-consultant");
+    expect(LEGACY_AGENT_ALIASES["momus"]).toBe("plan-reviewer");
+    expect(LEGACY_CATEGORY_ALIASES["deep"]).toBe("deep-low");
+    for (const target of Object.values(LEGACY_AGENT_ALIASES)) {
+      expect(isNativeAgent(target)).toBe(true);
+    }
+    for (const target of Object.values(LEGACY_CATEGORY_ALIASES)) {
+      expect(isNativeCategory(target)).toBe(true);
+    }
   });
 
   it("lists the eight schema reasoning levels in order", () => {

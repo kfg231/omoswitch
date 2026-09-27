@@ -6,7 +6,7 @@ export type Drift = "inSync" | "drifted" | "noActive" | "configMissing" | "confi
 export interface Status { configPath: string; configExists: boolean; activeProfileId: string | null; drift: Drift; nativeBlockPresent: boolean; legacySenpiPresent: boolean; omoAvailable: boolean; configHash: string | null; }
 export interface SwitchPreview { profileId: string; baseHash: string; beforeNative: string; afterNative: string; changed: boolean; }
 export interface ApplyResult { changed: boolean; backupPath: string | null; configPath: string; }
-export interface ImportResult { profile: Profile; renamed: [string, string][]; }
+export interface ImportResult { profile: Profile; renamed: [string, string][]; dropped: string[]; }
 export interface ModelInfo { id: string; provider: string; model: string; context: string | null; maxOut: string | null; thinking: boolean; images: boolean; }
 export interface BackupInfo { path: string; createdAt: string; sizeBytes: number; }
 export type AppErrorKind = "configMissing" | "malformedJsonc" | "duplicateKey" | "changedOnDisk" | "verifyFailed" | "omoNotFound" | "omoListParse" | "io" | "storeCorrupt" | "profileNotFound" | "invalidProfile" | "notAnObject";

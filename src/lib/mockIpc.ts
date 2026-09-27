@@ -156,7 +156,19 @@ class MockBackend {
             ["momus", "plan-reviewer"],
           ]
         : [];
-    return { profile, renamed };
+    const dropped =
+      source === "opencode"
+        ? [
+            "sisyphus",
+            "hephaestus",
+            "prometheus",
+            "atlas",
+            "oracle",
+            "multimodal-looker",
+            "sisyphus-junior",
+          ]
+        : [];
+    return { profile, renamed, dropped };
   }
 
   captureActiveFromConfig(): Profile {

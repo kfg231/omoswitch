@@ -1,6 +1,7 @@
 import { clearMocks } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { api } from "./api";
+import { isNativeAgent } from "./catalog";
 import { installMockIpc } from "./mockIpc";
 import type { AppError } from "./types";
 
@@ -82,6 +83,8 @@ describe("mock IPC backend", () => {
       ["metis", "plan-consultant"],
       ["momus", "plan-reviewer"],
     ]);
+    expect(result.dropped).toContain("sisyphus");
+    expect(result.dropped.some((key) => isNativeAgent(key))).toBe(false);
     expect(await api.listProfiles()).toHaveLength(3);
   });
 

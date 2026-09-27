@@ -79,6 +79,20 @@ export function ImportDialog({ result, busy, onSubmit, onClose }: ImportDialogPr
           <p className="text-sm text-ink-800 dark:text-ink-100">
             {t("import.done", { name: result.profile.name })}
           </p>
+          {result.dropped.length > 0 ? (
+            <>
+              <p className="mt-1.5 text-xs font-medium text-ink-700 dark:text-ink-200">
+                {t("import.droppedNotice")}
+              </p>
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {result.dropped.map((key) => (
+                  <li key={key} className="font-mono text-micro text-ink-600 dark:text-ink-300">
+                    {t("import.droppedItem", { key })}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
           {result.renamed.length > 0 ? (
             <>
               <p className="mt-1.5 text-xs font-medium text-ink-700 dark:text-ink-200">

@@ -200,6 +200,7 @@ export function ProfileEditor({
                     <AssignmentRow
                       key={key}
                       entryKey={key}
+                      section={section.id}
                       assignment={assignment}
                       models={models}
                       omoAvailable={omoAvailable}

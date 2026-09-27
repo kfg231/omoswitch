@@ -87,6 +87,11 @@
     "fallbackPlaceholder": "provider/model",
     "removeFallback": "フォールバック「{{model}}」を取り除く",
     "suggestions": "候補",
+    "unknownKeyBadge": "native では無視されます",
+    "unknownAgentHint": "「{{key}}」は OmO Native が認識するエージェントではないため、この項目は無視されます。保存自体は可能です。",
+    "unknownCategoryHint": "「{{key}}」は OmO Native が認識するカテゴリではないため、この項目は無視されます。保存自体は可能です。",
+    "legacyKeyBadge": "旧名称",
+    "legacyKeyHint": "「{{key}}」は旧名称です。正式なキーは「{{target}}」です。",
     "saved": "プロファイルを保存しました",
     "emptySelection": "左の一覧からプロファイルを選択してください"
   },
@@ -136,6 +141,8 @@
     "name": "新しいプロファイル名",
     "renamedNotice": "次のキーを改名しました:",
     "renamedItem": "{{from}} → {{to}}",
+    "droppedNotice": "次のキーは OmO Native に存在しないため取り除きました:",
+    "droppedItem": "{{key}}",
     "submit": "取り込む",
     "done": "「{{name}}」を取り込みました"
   },

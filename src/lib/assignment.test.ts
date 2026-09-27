@@ -92,7 +92,7 @@ describe("validateProfileInput", () => {
   const existing = [profile("a", "Default"), profile("b", "Fast")];
 
   it("accepts a valid profile", () => {
-    expect(validateProfileInput(input({ agents: { sisyphus: { model: "p/m" } } }), existing)).toEqual({});
+    expect(validateProfileInput(input({ agents: { explore: { model: "p/m" } } }), existing)).toEqual({});
   });
 
   it("rejects an empty name", () => {
@@ -111,13 +111,13 @@ describe("validateProfileInput", () => {
   it("reports bad keys, empty models and bad reasoning per field", () => {
     const errors = validateProfileInput(
       input({
-        agents: { "Bad_Key": { model: "p/m" }, oracle: { model: "" } },
+        agents: { "Bad_Key": { model: "p/m" }, librarian: { model: "" } },
         categories: { quick: { model: "p/m", reasoning: "turbo" } },
       }),
       existing,
     );
     expect(errors["agents.Bad_Key"]).toBe("validation.keyPattern");
-    expect(errors["agents.oracle.model"]).toBe("validation.modelRequired");
+    expect(errors["agents.librarian.model"]).toBe("validation.modelRequired");
     expect(errors["categories.quick.reasoning"]).toBe("validation.reasoningInvalid");
   });
 });

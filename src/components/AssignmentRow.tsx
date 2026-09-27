@@ -1,13 +1,21 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { mergeAssignment, splitAssignment } from "../lib/assignment";
-import { REASONING_LEVELS, isReasoning } from "../lib/catalog";
+import {
+  REASONING_LEVELS,
+  isNativeAgent,
+  isNativeCategory,
+  isReasoning,
+  legacyAgentTarget,
+  legacyCategoryTarget,
+} from "../lib/catalog";
 import type { Assignment, ModelInfo } from "../lib/types";
 import { ModelPicker } from "./ModelPicker";
-import { Button, Field, IconButton, Select, TextArea, TextInput } from "./primitives";
+import { Badge, Button, Field, IconButton, Select, TextArea, TextInput } from "./primitives";
 
 export interface AssignmentRowProps {
   entryKey: string;
+  section: "agents" | "categories";
   assignment: Assignment;
   models: readonly ModelInfo[];
   omoAvailable: boolean;
@@ -24,6 +32,7 @@ function stringifyExtra(extra: Record<string, unknown>): string {
 
 export function AssignmentRow({
   entryKey,
+  section,
   assignment,
   models,
   omoAvailable,
@@ -71,11 +80,22 @@ export function AssignmentRow({
     update({ models: [...parts.models, value] });
   }
 
+  const known = section === "agents" ? isNativeAgent(entryKey) : isNativeCategory(entryKey);
+  const legacyTarget =
+    section === "agents" ? legacyAgentTarget(entryKey) : legacyCategoryTarget(entryKey);
+  const unknownHint = known
+    ? null
+    : legacyTarget !== null
+      ? t("editor.legacyKeyHint", { key: entryKey, target: legacyTarget })
+      : t(section === "agents" ? "editor.unknownAgentHint" : "editor.unknownCategoryHint", {
+          key: entryKey,
+        });
+
   return (
     <li className="rounded-panel bg-ink-100/70 p-3 ring-1 ring-ink-200 dark:bg-ink-950/50 dark:ring-ink-800">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <div className="sm:w-44">
-          <Field label={t("editor.key")} error={keyError}>
+          <Field label={t("editor.key")} error={keyError} hint={unknownHint ?? undefined}>
             {(field) => (
               <TextInput
                 {...field}
@@ -85,6 +105,13 @@ export function AssignmentRow({
               />
             )}
           </Field>
+          {unknownHint !== null ? (
+            <div className="mt-1" title={unknownHint}>
+              <Badge tone="warn">
+                {t(legacyTarget !== null ? "editor.legacyKeyBadge" : "editor.unknownKeyBadge")}
+              </Badge>
+            </div>
+          ) : null}
         </div>
         <div className="flex-1">
           <Field label={t("editor.model")} error={modelError}>

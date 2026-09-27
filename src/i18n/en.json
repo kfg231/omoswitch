@@ -87,6 +87,11 @@
     "fallbackPlaceholder": "provider/model",
     "removeFallback": "Remove fallback \"{{model}}\"",
     "suggestions": "Suggestions",
+    "unknownKeyBadge": "Ignored by native",
+    "unknownAgentHint": "\"{{key}}\" is not one of the agents OmO Native knows, so native ignores this entry. It is still saved.",
+    "unknownCategoryHint": "\"{{key}}\" is not one of the categories OmO Native knows, so native ignores this entry. It is still saved.",
+    "legacyKeyBadge": "Legacy name",
+    "legacyKeyHint": "\"{{key}}\" is a legacy name. The canonical key is \"{{target}}\".",
     "saved": "Profile saved",
     "emptySelection": "Select a profile from the list on the left"
   },
@@ -136,6 +141,8 @@
     "name": "New profile name",
     "renamedNotice": "The following keys were renamed:",
     "renamedItem": "{{from}} → {{to}}",
+    "droppedNotice": "The following keys do not exist in OmO Native and were dropped:",
+    "droppedItem": "{{key}}",
     "submit": "Import",
     "done": "Imported \"{{name}}\""
   },
