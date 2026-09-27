@@ -256,6 +256,23 @@ File-conflict rule: T1 declared all modules in `lib.rs`. Wave 2/3 tasks edit ONL
 - **T8 commands/tray/CLI (deep-low, [context7-mcp, programming])** — `commands.rs` per contract (store reloaded per call), `lib.rs` single-instance + invoke_handler + hide on close, `tray.rs` checkbox item per profile + Open/Quit (OS-locale label) + tooltip `OmOswitch — <active|none> [drift]`, rebuild after mutations; tray click = apply without hash, error → show window + `omoswitch://error`; `bin/omoswitch-cli.rs`. Accept: cargo build/test green; cli `status` on temp home prints JSON.
 - **T9 E2E + QA + release (unspecified-high, [playwright, visual-qa, debugging, git-master])** — `e2e/app.spec.ts` against `pnpm dev:mock`; run S1–S11; `pnpm tauri dev` tray smoke on temp home; ask user before S12.
 
+## CORRECTION: native agent/category registry (verified at tag v5.0.1, ab725f3)
+
+The catalog shipped in T5 was taken from the OpenCode edition and is WRONG for native. Authoritative sources: `packages/senpi-task/src/agents/builtin/index.ts#L14-L44`, `packages/omo-native/bin/lib/setup-opencode-models.js#L19-L27`, `packages/senpi-task/src/category/{builtins,google-categories,openai-categories,anthropic-categories,kimi-categories}.ts`, `packages/omo-config-core/src/schema/reasoning-vocabulary.ts#L1-L23`.
+
+- **KNOWN_AGENTS (native, exactly 7):** `explore`, `librarian`, `plan-consultant`, `plan-reviewer`, `omo-native-code-reviewer`, `omo-native-qa-executor`, `omo-native-gate-reviewer`. Remove `sisyphus`, `hephaestus`, `prometheus`, `atlas`, `oracle`, `multimodal-looker`, `sisyphus-junior` — OpenCode-only; native `resolve-agent.ts#L78-L81` returns `not_found`. Native's main session has no agent entry (it uses the top-level default model), so there is no `sisyphus` equivalent to offer.
+- **KNOWN_CATEGORIES (10):** unchanged and all valid.
+- **REASONING_LEVELS:** `off, minimal, low, medium, high, xhigh, max` plus `auto`; input `none` normalizes to `off` (drop `none` from the UI).
+- **Legacy agent aliases:** `omo-senpi-code-reviewer|gate-reviewer|qa-executor` → `omo-native-*` (resolved on read, `legacy-agent-names.ts`). `metis`→`plan-consultant` and `momus`→`plan-reviewer` are **migration-only** (removed from the native alias table in v5.0.0-beta.57), so they matter only for the `[opencode]` import path — which is what `store.rs::import_profile` already does.
+- **Legacy category alias:** `deep` → `deep-low` (`legacy-category-names.ts#L8`), applied on read and by migration.
+- **Keys are freeform:** `z.record(z.string(), ...)` for both agents and categories, so an unknown key is not a schema error — but native drops it at resolution. The UI must therefore treat the catalog as *suggestions* and still allow free text, while marking non-native keys.
+- **Assignment fields are `.strict()`:** unknown properties inside an agent/category object are stripped with an `unknown-keys` diagnostic (`loader.ts#L219-L224`). The "extra JSON" editor must warn that arbitrary keys get dropped. Native-only fields worth exposing later: `execution_mode`, `background`, `max_depth`, `allowed_subagents`, `disallowed_tools`, `max_turns`; categories also take `top_p`, `max_tokens`, `prompt_append`, `provider_options`.
+
+### Follow-up tasks (queued; must not collide with in-flight T6/T7)
+
+- **T7b (`src/lib/catalog.ts`, visual-engineering):** replace KNOWN_AGENTS with the 7 native names, drop `none` from REASONING_LEVELS, add `LEGACY_AGENT_ALIASES` / `LEGACY_CATEGORY_ALIASES`, and surface a "not recognized by native" marker in `AssignmentRow`. Update `mockData.ts` seeds and any i18n keys; `pnpm test` + `pnpm build` must stay green.
+- **T8b (`src-tauri/src/store.rs`, deep-low):** on `[opencode]` import, after renaming `metis`/`momus`, DROP agent keys outside the 7 native names and report them as `dropped` alongside `renamed` (contract change: `ImportResult.dropped: string[]`, mirrored in `types.ts` and the mock). Map category `deep`→`deep-low`. Add tests: importing the user-shaped `[opencode]` block yields exactly `plan-consultant`, `plan-reviewer` (renamed) and drops the 9 OpenCode-only agents.
+
 ## Scenario Contract
 
 QA env (S5–S10 never touch real `~/.omo`; S6 reads it only as diff baseline):
