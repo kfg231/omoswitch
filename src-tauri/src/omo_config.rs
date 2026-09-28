@@ -75,7 +75,7 @@ fn config_missing(path: &Path) -> AppError {
         message: path.display().to_string(),
     }
 }
-fn hash(bytes: &[u8]) -> String {
+pub(crate) fn hash(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -362,7 +362,7 @@ fn create_backup(paths: &Paths, bytes: &[u8]) -> Result<PathBuf, AppError> {
     Ok(path)
 }
 
-fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), AppError> {
+pub(crate) fn atomic_write(target: &Path, bytes: &[u8]) -> Result<(), AppError> {
     let temp = target.with_file_name("omo.jsonc.omoswitch.tmp");
     fs::write(&temp, bytes).map_err(io)?;
     let result = replace_file(&temp, target);
