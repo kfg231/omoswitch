@@ -1,3 +1,4 @@
+use omoswitch_lib::catalog;
 use omoswitch_lib::commands::{
     error_value, json_value, profile_by_name_or_id, provider_key_for_request,
 };
@@ -13,7 +14,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn usage() -> &'static str {
-    "usage: omoswitch-cli <status|list|import|preview|apply|models|backups|providers|provider-add|provider-enable|provider-disable|provider-key|provider-test|provider-models|providers-import>"
+    "usage: omoswitch-cli <status|list|import|preview|apply|models|catalog|backups|providers|provider-add|provider-enable|provider-disable|provider-key|provider-test|provider-models|providers-import>"
 }
 
 fn arg_value(args: &[String], name: &str) -> Result<String, AppError> {
@@ -157,6 +158,10 @@ fn run(args: &[String]) -> Result<String, AppError> {
             &paths,
             args.iter().any(|arg| arg == "--refresh"),
         )?),
+        "catalog" => json_value(&catalog::get_catalog(
+            &paths,
+            args.iter().any(|arg| arg == "--refresh"),
+        )?),
         "backups" => json_value(&omo_config::list_backups(&paths)?),
         "providers" => json_value(&list_providers(&paths)?),
         "provider-add" => {
@@ -261,6 +266,16 @@ mod tests {
         let args = vec![
             "cli".to_owned(),
             "models".to_owned(),
+            "--refresh".to_owned(),
+        ];
+        assert!(args.iter().any(|arg| arg == "--refresh"));
+    }
+
+    #[test]
+    fn parses_catalog_refresh_flag() {
+        let args = vec![
+            "cli".to_owned(),
+            "catalog".to_owned(),
             "--refresh".to_owned(),
         ];
         assert!(args.iter().any(|arg| arg == "--refresh"));

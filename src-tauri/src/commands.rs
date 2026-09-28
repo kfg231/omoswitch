@@ -1,3 +1,4 @@
+use crate::catalog::NativeCatalog;
 use crate::error::AppError;
 use crate::models::ModelInfo;
 use crate::omo_config::{self, ApplyResult, BackupInfo, Status, SwitchPreview};
@@ -113,8 +114,19 @@ pub fn apply_profile(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn list_models(state: State<'_, AppState>, refresh: bool) -> Result<Vec<ModelInfo>, AppError> {
+pub async fn list_models(
+    state: State<'_, AppState>,
+    refresh: bool,
+) -> Result<Vec<ModelInfo>, AppError> {
     crate::models::list_models(&state.paths, refresh)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn get_native_catalog(
+    state: State<'_, AppState>,
+    refresh: bool,
+) -> Result<NativeCatalog, AppError> {
+    crate::catalog::get_catalog(&state.paths, refresh)
 }
 
 #[tauri::command(rename_all = "camelCase")]

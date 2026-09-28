@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod catalog;
 pub mod commands;
 pub mod error;
 pub mod jsonc_edit;
@@ -41,6 +42,7 @@ pub fn run() {
             commands::preview_switch,
             commands::apply_profile,
             commands::list_models,
+            commands::get_native_catalog,
             commands::list_backups,
             commands::restore_backup,
             commands::list_providers,
