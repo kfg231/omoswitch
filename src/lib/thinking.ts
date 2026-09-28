@@ -1,3 +1,4 @@
+import { REASONING_LEVELS } from "./catalog";
 import type { ModelInfo, ProviderInfo, ProviderModel, Reasoning, ThinkingLevel, ThinkingLevelMap } from "./types";
 
 export const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -55,4 +56,13 @@ export function reasoningOptions(
   const allowed = new Set<Reasoning>([...levels, "auto"]);
   if (current !== null) allowed.add(current);
   return all.filter((level) => allowed.has(level));
+}
+
+export function isSupportedReasoning(
+  modelRef: string,
+  level: Reasoning,
+  models: readonly ModelInfo[],
+  providers: readonly ProviderInfo[],
+): boolean {
+  return reasoningOptions(modelRef, null, models, providers, REASONING_LEVELS).includes(level);
 }

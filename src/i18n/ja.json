@@ -187,7 +187,8 @@
     "nameDuplicate": "同じ名前のプロファイルが既にあります",
     "keyPattern": "キーは英小文字・数字・ハイフンのみ使用できます",
     "modelRequired": "モデルを入力してください",
-    "reasoningInvalid": "推論レベルが不正です"
+    "reasoningInvalid": "推論レベルが不正です",
+    "reasoningUnsupported": "このモデルは選択した推論レベルに対応していません"
   },
   "provider": {
     "title": "プロバイダ",

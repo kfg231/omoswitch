@@ -108,6 +108,21 @@ describe("validateProfileInput", () => {
     expect(validateProfileInput(input({ id: "a", name: "Default" }), existing)["name"]).toBeUndefined();
   });
 
+  it("rejects a reasoning level excluded by a known model", () => {
+    const models = [{ id: "p/plain", provider: "p", model: "plain", context: null, maxOut: null, thinking: false, images: false }];
+    const errors = validateProfileInput(
+      input({ agents: { explore: { model: "p/plain", reasoning: "high" } } }),
+      existing,
+      models,
+    );
+    expect(errors["agents.explore.reasoning"]).toBe("validation.reasoningUnsupported");
+    expect(validateProfileInput(
+      input({ agents: { explore: { model: "p/plain", reasoning: "off" } } }),
+      existing,
+      models,
+    )).toEqual({});
+  });
+
   it("reports bad keys, empty models and bad reasoning per field", () => {
     const errors = validateProfileInput(
       input({

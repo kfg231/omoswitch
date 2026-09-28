@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { mergeAssignment, splitAssignment } from "../lib/assignment";
 import { findDeadProviders } from "../lib/deadReference";
-import { reasoningOptions } from "../lib/thinking";
+import { isSupportedReasoning, reasoningOptions } from "../lib/thinking";
 import {
   REASONING_LEVELS,
   isNativeAgent,
@@ -27,6 +27,7 @@ export interface AssignmentRowProps {
   onConfigureProvider: (providerId: string) => void;
   keyError?: string;
   modelError?: string;
+  reasoningError?: string;
   onChange: (next: Assignment) => void;
   onRemove: () => void;
   onRefreshModels: () => Promise<void>;
@@ -47,6 +48,7 @@ export function AssignmentRow({
   onConfigureProvider,
   keyError,
   modelError,
+  reasoningError,
   onChange,
   onRemove,
   onRefreshModels,
@@ -145,13 +147,21 @@ export function AssignmentRow({
               models={models}
               providers={providers}
               omoAvailable={omoAvailable}
-              onChange={(model) => update({ model })}
+              onChange={(model) =>
+                update({
+                  model,
+                  reasoning:
+                    parts.reasoning !== null && !isSupportedReasoning(model, parts.reasoning, models, providers)
+                      ? null
+                      : parts.reasoning,
+                })
+              }
               onRefresh={onRefreshModels}
             />
           )}
         </Field>
 
-        <Field label={t("editor.reasoning")} labelHidden>
+        <Field label={t("editor.reasoning")} labelHidden error={reasoningError}>
           {(field) => (
             <Select
               {...field}

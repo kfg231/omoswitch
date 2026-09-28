@@ -77,6 +77,22 @@ describe("ProfileEditor", () => {
     });
   });
 
+  it("clears unsupported reasoning when switching to a non-thinking model", () => {
+    const { onSave } = renderEditor({ profile: existing });
+    fireEvent.input(screen.getByLabelText("モデル", { exact: true }), { target: { value: "openai/o5-pro" } });
+    expect(screen.getByLabelText("推論レベル")).toHaveProperty("value", "");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(onSave.mock.calls[0]?.[0].agents.explore).toEqual({ model: "openai/o5-pro" });
+  });
+
+  it("blocks saving an existing unsupported reasoning level", () => {
+    const invalid: Profile = { ...existing, agents: { explore: { model: "openai/o5-pro", reasoning: "high" } } };
+    const { onSave } = renderEditor({ profile: invalid });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByText("このモデルは選択した推論レベルに対応していません")).toBeTruthy();
+  });
+
   it("still requires a model on a partially filled row", () => {
     const { onSave } = renderEditor();
     fireEvent.change(screen.getByPlaceholderText("プロファイル名"), { target: { value: "Fresh" } });

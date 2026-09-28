@@ -210,7 +210,7 @@ export function ProfileEditor({
       agents: withoutBlankRows(draft.agents),
       categories: withoutBlankRows(draft.categories),
     };
-    const found = validateProfileInput(input, profiles);
+    const found = validateProfileInput(input, profiles, models, providers);
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     setDirty(false);
@@ -400,6 +400,11 @@ export function ProfileEditor({
                         errors[`${section.id}.${key}.model`] === undefined
                           ? undefined
                           : t(errors[`${section.id}.${key}.model`] as string)
+                      }
+                      reasoningError={
+                        errors[`${section.id}.${key}.reasoning`] === undefined
+                          ? undefined
+                          : t(errors[`${section.id}.${key}.reasoning`] as string)
                       }
                       onChange={(next) => setEntry(section.id, key, next)}
                       onRemove={() => removeEntry(section.id, key)}

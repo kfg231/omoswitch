@@ -1,5 +1,6 @@
 import { isReasoning } from "./catalog";
-import type { Assignment, Profile, ProfileInput, Reasoning } from "./types";
+import { isSupportedReasoning } from "./thinking";
+import type { Assignment, ModelInfo, Profile, ProfileInput, ProviderInfo, Reasoning } from "./types";
 
 export interface AssignmentParts {
   model: string;
@@ -63,6 +64,8 @@ function validateAssignments(
   section: "agents" | "categories",
   entries: Record<string, Assignment>,
   errors: ValidationErrors,
+  models: readonly ModelInfo[],
+  providers: readonly ProviderInfo[],
 ): void {
   for (const [key, assignment] of Object.entries(entries)) {
     const field = `${section}.${key}`;
@@ -72,6 +75,8 @@ function validateAssignments(
     const reasoning = assignment["reasoning"];
     if (reasoning !== undefined && !isReasoning(reasoning)) {
       errors[`${field}.reasoning`] = "validation.reasoningInvalid";
+    } else if (isReasoning(reasoning) && !isSupportedReasoning(parts.model, reasoning, models, providers)) {
+      errors[`${field}.reasoning`] = "validation.reasoningUnsupported";
     }
   }
 }
@@ -79,6 +84,8 @@ function validateAssignments(
 export function validateProfileInput(
   input: ProfileInput,
   existingProfiles: readonly Profile[],
+  models: readonly ModelInfo[] = [],
+  providers: readonly ProviderInfo[] = [],
 ): ValidationErrors {
   const errors: ValidationErrors = {};
   const name = input.name.trim();
@@ -91,7 +98,7 @@ export function validateProfileInput(
   ) {
     errors["name"] = "validation.nameDuplicate";
   }
-  validateAssignments("agents", input.agents, errors);
-  validateAssignments("categories", input.categories, errors);
+  validateAssignments("agents", input.agents, errors, models, providers);
+  validateAssignments("categories", input.categories, errors, models, providers);
   return errors;
 }

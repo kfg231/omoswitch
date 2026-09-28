@@ -187,7 +187,8 @@
     "nameDuplicate": "A profile with this name already exists",
     "keyPattern": "Keys may use lowercase letters, digits and hyphens only",
     "modelRequired": "Enter a model",
-    "reasoningInvalid": "Invalid reasoning level"
+    "reasoningInvalid": "Invalid reasoning level",
+    "reasoningUnsupported": "This model does not support the selected reasoning level"
   },
   "provider": {
     "title": "Providers",
