@@ -98,4 +98,33 @@ describe("ModelPicker", () => {
     await act(async () => settle());
     expect(screen.getByRole("button", { name: "一覧を再取得" })).toHaveProperty("disabled", false);
   });
+
+  it("in add mode hands a clicked option or typed text to onPick instead of onChange", () => {
+    const onChange = vi.fn();
+    const onPick = vi.fn();
+    render(
+      <ModelPicker
+        id="picker"
+        value=""
+        models={seedModels()}
+        providers={[]}
+        omoAvailable
+        onChange={onChange}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onPick={onPick}
+      />,
+    );
+    const input = screen.getByRole("combobox");
+    act(() => input.focus());
+    const first = within(screen.getByRole("listbox")).getAllByRole("option")[0];
+    if (first === undefined) throw new Error("no options");
+    fireEvent.mouseDown(first);
+    expect(onPick).toHaveBeenCalledWith(first.querySelector("span")?.textContent);
+
+    const again = screen.getByRole("combobox");
+    fireEvent.input(again, { target: { value: "custom/free-text" } });
+    fireEvent.keyDown(again, { key: "Enter" });
+    expect(onPick).toHaveBeenLastCalledWith("custom/free-text");
+    expect(onChange).not.toHaveBeenCalledWith(first.querySelector("span")?.textContent);
+  });
 });

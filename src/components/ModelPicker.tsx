@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { mergeModelOptions } from "../lib/deadReference";
 import type { ModelInfo, ProviderInfo } from "../lib/types";
@@ -16,6 +16,8 @@ export interface ModelPickerProps {
   describedBy?: string;
   onChange: (value: string) => void;
   onRefresh: () => Promise<void>;
+  onPick?: (value: string) => void;
+  trailing?: ReactNode;
 }
 
 export function ModelPicker({
@@ -27,6 +29,8 @@ export function ModelPicker({
   describedBy,
   onChange,
   onRefresh,
+  onPick,
+  trailing,
 }: ModelPickerProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -41,6 +45,8 @@ export function ModelPicker({
   const composingRef = useRef(false);
   const pickingRef = useRef(false);
   const suppressOpenRef = useRef(false);
+  // In add mode Enter submits the typed text unless the user arrowed onto a suggestion.
+  const navigatedRef = useRef(false);
 
   const options = useMemo(() => mergeModelOptions(models, providers), [models, providers]);
 
@@ -69,6 +75,7 @@ export function ModelPicker({
   const hintId = `${listId}-hint`;
 
   function openList(): void {
+    navigatedRef.current = false;
     setQuery("");
     const selected = options.slice(0, MODEL_PICKER_LIMIT).findIndex((option) => option.id === value);
     setHighlight(selected === -1 ? 0 : selected);
@@ -81,7 +88,8 @@ export function ModelPicker({
   }
 
   function pick(next: string): void {
-    onChange(next);
+    if (onPick !== undefined) onPick(next);
+    else onChange(next);
     pickingRef.current = true;
     suppressOpenRef.current = true;
     setQuery("");
@@ -119,6 +127,7 @@ export function ModelPicker({
             onCommit={push}
             onInput={(event) => {
               const next = event.currentTarget.value;
+              navigatedRef.current = false;
               setQuery(next);
               setHighlight(0);
               setOpen(true);
@@ -147,12 +156,23 @@ export function ModelPicker({
                   openList();
                   return;
                 }
+                navigatedRef.current = true;
                 setHighlight((current) => (matches.length === 0 ? 0 : (current + 1) % matches.length));
               } else if (event.key === "ArrowUp") {
                 event.preventDefault();
+                navigatedRef.current = true;
                 setHighlight((current) =>
                   matches.length === 0 ? 0 : (current - 1 + matches.length) % matches.length,
                 );
+              } else if (event.key === "Enter" && onPick !== undefined) {
+                event.preventDefault();
+                const typed = event.currentTarget.value.trim();
+                const highlighted = open ? matches[highlight] : undefined;
+                const next =
+                  highlighted !== undefined && (navigatedRef.current || typed === "")
+                    ? highlighted.id
+                    : typed;
+                if (next !== "") pick(next);
               } else if (event.key === "Enter" && open) {
                 const picked = matches[highlight];
                 if (picked !== undefined) {
@@ -227,27 +247,29 @@ export function ModelPicker({
             </div>
           ) : null}
         </div>
-        <Button
-          disabled={refreshing}
-          aria-busy={refreshing}
-          aria-label={refreshing ? t("modelPicker.refreshing") : t("modelPicker.refresh")}
-          title={t("modelPicker.refresh")}
-          size="icon"
-          onClick={() => void refresh()}
-        >
-          <span aria-hidden="true" className={refreshing ? "animate-spin" : ""}>
-            ↻
-          </span>
-        </Button>
+        {trailing ?? (
+          <Button
+            disabled={refreshing}
+            aria-busy={refreshing}
+            aria-label={refreshing ? t("modelPicker.refreshing") : t("modelPicker.refresh")}
+            title={t("modelPicker.refresh")}
+            size="icon"
+            onClick={() => void refresh()}
+          >
+            <span aria-hidden="true" className={refreshing ? "animate-spin" : ""}>
+              ↻
+            </span>
+          </Button>
+        )}
       </div>
       <p
         id={hintId}
         className={
-          omoAvailable
-            ? open
+          !omoAvailable && onPick === undefined
+            ? "text-micro text-warn-700 dark:text-warn-300"
+            : open
               ? "text-micro text-ink-500 dark:text-ink-400"
               : "sr-only"
-            : "text-micro text-warn-700 dark:text-warn-300"
         }
       >
         {hint}

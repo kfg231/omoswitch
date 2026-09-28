@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { mergeAssignment, splitAssignment } from "../lib/assignment";
 import { findDeadProviders } from "../lib/deadReference";
@@ -11,7 +11,6 @@ import {
   legacyCategoryTarget,
 } from "../lib/catalog";
 import type { Assignment, ModelInfo, ProviderInfo } from "../lib/types";
-import { ImeSafeInput } from "./ImeSafeInput";
 import { ModelPicker } from "./ModelPicker";
 import { Badge, Button, Field, IconButton, Select, TextArea, TextInput } from "./primitives";
 
@@ -60,16 +59,7 @@ export function AssignmentRow({
   const [extraOpen, setExtraOpen] = useState(false);
   const [fallbackDraft, setFallbackDraft] = useState("");
   const [fallbackRevision, setFallbackRevision] = useState(0);
-  const fallbackRef = useRef<HTMLInputElement>(null);
-  const refocusFallback = useRef(false);
   const extraPanelId = useId();
-
-  useEffect(() => {
-    if (refocusFallback.current) {
-      refocusFallback.current = false;
-      fallbackRef.current?.focus();
-    }
-  }, [fallbackRevision]);
 
   function update(next: Partial<typeof parts>): void {
     onChange(mergeAssignment({ ...parts, ...next }, order));
@@ -95,13 +85,12 @@ export function AssignmentRow({
     }
   }
 
-  function addFallback(raw: string, refocus: boolean): void {
+  function addFallback(raw: string, remount: boolean): void {
     const value = raw.trim();
     if (value === "") return;
     setFallbackDraft("");
-    // Remount the IME-safe input so its internal draft resets to empty.
-    refocusFallback.current = refocus;
-    setFallbackRevision((current) => current + 1);
+    // A list pick already remounts the picker's input; the "+" button path must reset it here.
+    if (remount) setFallbackRevision((current) => current + 1);
     update({ models: [...parts.models, value] });
   }
 
@@ -188,31 +177,28 @@ export function AssignmentRow({
         <div className="flex min-w-0 flex-col gap-1.5 sm:col-start-2">
           <Field label={t("editor.fallbackModels")}>
             {(field) => (
-              <div className="flex items-center gap-1.5">
-                <ImeSafeInput
-                  {...field}
-                  key={fallbackRevision}
-                  ref={fallbackRef}
-                  value={fallbackDraft}
-                  placeholder={t("editor.fallbackPlaceholder")}
-                  className="font-mono"
-                  onCommit={setFallbackDraft}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-                      event.preventDefault();
-                      addFallback(event.currentTarget.value, true);
-                    }
-                  }}
-                />
-                <Button
-                  aria-label={t("editor.addFallback")}
-                  title={t("editor.addFallback")}
-                  size="icon"
-                  onClick={() => addFallback(fallbackDraft, false)}
-                >
-                  <span aria-hidden="true">+</span>
-                </Button>
-              </div>
+              <ModelPicker
+                key={fallbackRevision}
+                id={field.id}
+                describedBy={field["aria-describedby"]}
+                value={fallbackDraft}
+                models={models}
+                providers={providers}
+                omoAvailable={omoAvailable}
+                onChange={setFallbackDraft}
+                onRefresh={onRefreshModels}
+                onPick={(model) => addFallback(model, false)}
+                trailing={
+                  <Button
+                    aria-label={t("editor.addFallback")}
+                    title={t("editor.addFallback")}
+                    size="icon"
+                    onClick={() => addFallback(fallbackDraft, true)}
+                  >
+                    <span aria-hidden="true">+</span>
+                  </Button>
+                }
+              />
             )}
           </Field>
           {parts.models.length > 0 ? (
