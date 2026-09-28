@@ -199,6 +199,29 @@ pub fn save_provider(
     provider_by_id(&state.paths, &id)
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderJson {
+    pub json: String,
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_provider_json(state: State<'_, AppState>, id: String) -> Result<ProviderJson, AppError> {
+    Ok(ProviderJson {
+        json: providers::provider_json(&state.paths, &id)?,
+    })
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn save_provider_json(
+    state: State<'_, AppState>,
+    id: String,
+    json: String,
+) -> Result<ProviderInfo, AppError> {
+    providers::save_provider_json(&state.paths, &id, &json)?;
+    provider_by_id(&state.paths, &id)
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub fn delete_provider(state: State<'_, AppState>, id: String) -> Result<(), AppError> {
     providers::delete(&state.paths, &id)

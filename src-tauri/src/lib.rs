@@ -47,6 +47,8 @@ pub fn run() {
             commands::restore_backup,
             commands::list_providers,
             commands::save_provider,
+            commands::get_provider_json,
+            commands::save_provider_json,
             commands::delete_provider,
             commands::set_provider_enabled,
             commands::set_provider_key,

@@ -26,9 +26,15 @@ pub struct ProviderModel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u64>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +82,7 @@ pub struct SaveResult {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderImportResult {
     pub imported: Vec<String>,
+    pub updated: Vec<String>,
     pub skipped: Vec<String>,
     pub keys_found: usize,
 }
@@ -102,6 +109,193 @@ fn invalid(field: &str, message: &str) -> AppError {
         message: message.to_owned(),
         field: field.to_owned(),
     }
+}
+
+const REDACTED: &str = "<redacted>";
+const EFFORTS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+
+fn sensitive_header_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    [
+        "authorization",
+        "api-key",
+        "apikey",
+        "token",
+        "secret",
+        "key",
+    ]
+    .iter()
+    .any(|needle| name.contains(needle))
+}
+
+fn api_key_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("apiKey")
+}
+
+fn redact_headers(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if let Some(Value::Object(headers)) = object.get_mut("headers") {
+                for (name, value) in headers {
+                    if sensitive_header_name(name) {
+                        *value = Value::String(REDACTED.to_owned());
+                    }
+                }
+            }
+            for value in object.values_mut() {
+                redact_headers(value);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                redact_headers(value);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn redact_api_keys(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            let keys = object.keys().cloned().collect::<Vec<_>>();
+            for key in keys {
+                if key.eq_ignore_ascii_case("apiKey") {
+                    if let Some(value) = object.get_mut(&key) {
+                        *value = Value::String(REDACTED.to_owned());
+                    }
+                } else if let Some(value) = object.get_mut(&key) {
+                    redact_api_keys(value);
+                }
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                redact_api_keys(value);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn redacted_model_value(value: &Value) -> Value {
+    let mut value = value.clone();
+    redact_headers(&mut value);
+    redact_api_keys(&mut value);
+    value
+}
+
+fn restore_header_values(candidate: &mut Value, existing: Option<&Value>) -> Result<(), AppError> {
+    let Some(headers) = candidate.as_object_mut() else {
+        return Ok(());
+    };
+    let existing_headers = existing.and_then(Value::as_object);
+    for (name, value) in headers {
+        if value.as_str() == Some(REDACTED) {
+            let Some(existing_value) = existing_headers.and_then(|headers| {
+                headers.get(name).or_else(|| {
+                    headers
+                        .iter()
+                        .find(|(existing_name, _)| existing_name.eq_ignore_ascii_case(name))
+                        .map(|(_, value)| value)
+                })
+            }) else {
+                return Err(invalid("headers", "redacted header has no existing value"));
+            };
+            *value = existing_value.clone();
+        }
+    }
+    Ok(())
+}
+
+fn restore_api_key_value(candidate: &mut Value, existing: Option<&Value>) -> Result<(), AppError> {
+    if candidate.as_str() != Some(REDACTED) {
+        return Ok(());
+    }
+    let Some(existing) = existing else {
+        return Err(invalid("apiKey", "redacted value has no existing value"));
+    };
+    *candidate = existing.clone();
+    Ok(())
+}
+
+fn restore_redacted_headers(candidate: &mut Value, existing: &Value) -> Result<(), AppError> {
+    let (Value::Object(candidate_object), Value::Object(existing_object)) = (candidate, existing)
+    else {
+        return Ok(());
+    };
+    let candidate_keys = candidate_object.keys().cloned().collect::<Vec<_>>();
+    for key in candidate_keys {
+        if key.eq_ignore_ascii_case("apiKey") {
+            let existing_value = existing_object.get(&key).or_else(|| {
+                existing_object
+                    .iter()
+                    .find(|(existing_name, _)| existing_name.eq_ignore_ascii_case(&key))
+                    .map(|(_, value)| value)
+            });
+            if let Some(value) = candidate_object.get_mut(&key) {
+                restore_api_key_value(value, existing_value)?;
+            }
+            continue;
+        }
+        if key == "headers" {
+            if let Some(headers) = candidate_object.get_mut(&key) {
+                if headers.is_object() {
+                    restore_header_values(headers, existing_object.get("headers"))?;
+                }
+            }
+            continue;
+        }
+        if key == "models" {
+            let Some(Value::Array(candidate_models)) = candidate_object.get_mut(&key) else {
+                continue;
+            };
+            let existing_models = existing_object
+                .get("models")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            for candidate_model in candidate_models {
+                let existing_model = candidate_model
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| {
+                        existing_models
+                            .iter()
+                            .find(|model| model.get("id").and_then(Value::as_str) == Some(id))
+                    })
+                    .unwrap_or(&Value::Null);
+                restore_redacted_headers(candidate_model, existing_model)?;
+            }
+            continue;
+        }
+        if let Some(candidate_child) = candidate_object.get_mut(&key) {
+            if let Some(existing_child) = existing_object.get(&key) {
+                restore_redacted_headers(candidate_child, existing_child)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_provider_json(text: &str) -> Result<Value, AppError> {
+    jsonc_edit::parse_value(text).map_err(|error| match error {
+        AppError::MalformedJsonc { line, col, .. } => AppError::MalformedJsonc {
+            message: "provider JSON could not be parsed".to_owned(),
+            line,
+            col,
+        },
+        error => error,
+    })
+}
+
+fn replace_provider_value(text: &str, id: &str, value: &Value) -> Result<String, AppError> {
+    jsonc_edit::set_object_path(text, &["providers", id], value).map_err(|error| match error {
+        AppError::VerifyFailed { .. } => AppError::VerifyFailed {
+            message: "provider JSON replacement could not be verified".to_owned(),
+        },
+        error => error,
+    })
 }
 
 fn read_snapshot(path: &Path) -> Result<Option<Snapshot>, AppError> {
@@ -167,16 +361,29 @@ fn model_value(model: &ProviderModel) -> Value {
     if let Some(reasoning) = model.reasoning {
         value.insert(String::from("reasoning"), Value::Bool(reasoning));
     }
+    if let Some(input) = &model.input {
+        value.insert(
+            String::from("input"),
+            Value::Array(input.iter().cloned().map(Value::String).collect()),
+        );
+    }
+    if let Some(thinking) = &model.thinking {
+        value.insert(String::from("thinking"), thinking.clone());
+    }
     if let Some(context_window) = model.context_window {
         value.insert(String::from("contextWindow"), Value::from(context_window));
     }
     if let Some(max_tokens) = model.max_tokens {
         value.insert(String::from("maxTokens"), Value::from(max_tokens));
     }
+    for (key, extra) in &model.extra {
+        value.entry(key.clone()).or_insert_with(|| extra.clone());
+    }
     Value::Object(value)
 }
 
-fn provider_value(input: &ProviderInput, existing: Option<Value>) -> Value {
+fn provider_value(input: &ProviderInput, existing: Option<Value>) -> Result<Value, AppError> {
+    let existing_value = existing.clone();
     let mut value = existing
         .and_then(|value| value.as_object().cloned())
         .unwrap_or_default();
@@ -186,11 +393,24 @@ fn provider_value(input: &ProviderInput, existing: Option<Value>) -> Value {
         Value::String(input.base_url.clone()),
     );
     value.insert(String::from("api"), Value::String(input.api.clone()));
-    value.insert(
-        String::from("models"),
-        Value::Array(input.models.iter().map(model_value).collect()),
-    );
-    Value::Object(value)
+    let existing_models = value.get("models").cloned().unwrap_or(Value::Null);
+    let mut models = input.models.iter().map(model_value).collect::<Vec<_>>();
+    for model in &mut models {
+        let existing_model = model.get("id").and_then(Value::as_str).and_then(|id| {
+            existing_models.as_array().and_then(|models| {
+                models
+                    .iter()
+                    .find(|candidate| candidate.get("id").and_then(Value::as_str) == Some(id))
+            })
+        });
+        restore_redacted_headers(model, existing_model.unwrap_or(&Value::Null))?;
+    }
+    value.insert(String::from("models"), Value::Array(models));
+    let mut value = Value::Object(value);
+    if let Some(existing) = existing_value.as_ref() {
+        restore_redacted_headers(&mut value, existing)?;
+    }
+    Ok(value)
 }
 
 fn provider_map(text: &str) -> Result<Map<String, Value>, AppError> {
@@ -218,19 +438,7 @@ fn models_field(object: &Map<String, Value>) -> Vec<ProviderModel> {
         .map(|models| {
             models
                 .iter()
-                .filter_map(|value| {
-                    let object = value.as_object()?;
-                    Some(ProviderModel {
-                        id: object.get("id")?.as_str()?.to_owned(),
-                        name: object
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned),
-                        reasoning: object.get("reasoning").and_then(Value::as_bool),
-                        context_window: object.get("contextWindow").and_then(Value::as_u64),
-                        max_tokens: object.get("maxTokens").and_then(Value::as_u64),
-                    })
-                })
+                .filter_map(|value| serde_json::from_value(redacted_model_value(value)).ok())
                 .collect()
         })
         .unwrap_or_default()
@@ -419,8 +627,11 @@ fn save_at(agent_dir: &Path, input: ProviderInput) -> Result<SaveResult, AppErro
     validate(&input)?;
     let (original, text) = load_models(agent_dir)?;
     let existing = jsonc_edit::get_object_path(&text, &["providers", &input.id])?;
-    let value = provider_value(&input, existing);
-    let new_text = jsonc_edit::set_object_path(&text, &["providers", &input.id], &value)?;
+    let value = provider_value(&input, existing.clone())?;
+    if existing.as_ref().is_some_and(|existing| existing == &value) {
+        return write_models(agent_dir, original.as_ref(), &text);
+    }
+    let new_text = replace_provider_value(&text, &input.id, &value)?;
     write_models(agent_dir, original.as_ref(), &new_text)
 }
 
@@ -512,17 +723,74 @@ pub fn set_enabled(paths: &Paths, id: &str, enabled: bool) -> Result<(), AppErro
     set_enabled_at(&paths.agent_dir(), id, enabled).map(|_| ())
 }
 
+fn positive_u64(value: Option<&Value>) -> Option<u64> {
+    value.and_then(Value::as_u64).filter(|value| *value > 0)
+}
+
+fn imported_input_values(value: &Map<String, Value>) -> Option<Vec<String>> {
+    let values = value.get("modalities")?.get("input")?.as_array()?;
+    let values = values
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|value| matches!(*value, "text" | "image"))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then_some(values)
+}
+
+fn imported_thinking(value: &Map<String, Value>) -> Option<Value> {
+    let variants = value.get("variants")?.as_object()?;
+    let mut efforts = variants
+        .iter()
+        .flat_map(|(key, variant)| {
+            let key_effort = EFFORTS.contains(&key.as_str()).then_some(key.as_str());
+            let value_effort = variant.as_object().and_then(|variant| {
+                ["effort", "reasoningEffort"]
+                    .iter()
+                    .find_map(|field| variant.get(*field).and_then(Value::as_str))
+                    .filter(|effort| EFFORTS.contains(effort))
+            });
+            key_effort.into_iter().chain(value_effort)
+        })
+        .collect::<Vec<_>>();
+    efforts.sort_by_key(|effort| {
+        EFFORTS
+            .iter()
+            .position(|candidate| candidate == effort)
+            .unwrap_or(usize::MAX)
+    });
+    efforts.dedup();
+    if efforts.is_empty() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "mode": "effort",
+        "efforts": efforts,
+    }))
+}
+
 fn import_model(value: &Value, id: &str) -> ProviderModel {
+    let object = value.as_object();
+    let reasoning = object
+        .and_then(|object| object.get("reasoning"))
+        .and_then(Value::as_bool);
+    let thinking = object.and_then(imported_thinking);
     ProviderModel {
         id: id.to_owned(),
-        name: value
-            .as_object()
+        name: object
             .and_then(|object| object.get("name"))
             .and_then(Value::as_str)
             .map(str::to_owned),
-        reasoning: None,
-        context_window: None,
-        max_tokens: None,
+        reasoning: reasoning.or_else(|| thinking.as_ref().map(|_| true)),
+        input: object.and_then(imported_input_values),
+        thinking,
+        context_window: object.and_then(|object| {
+            positive_u64(object.get("limit").and_then(|limit| limit.get("context")))
+        }),
+        max_tokens: object.and_then(|object| {
+            positive_u64(object.get("limit").and_then(|limit| limit.get("output")))
+        }),
+        extra: Map::new(),
     }
 }
 
@@ -576,6 +844,51 @@ fn imported_input(id: &str, value: &Value) -> Result<(ProviderInput, Option<Stri
     ))
 }
 
+fn fill_model_details(existing: &mut Value, imported: &ProviderModel) -> bool {
+    let Some(existing) = existing.as_object_mut() else {
+        return false;
+    };
+    let imported = model_value(imported);
+    let Some(imported) = imported.as_object() else {
+        return false;
+    };
+    let mut changed = false;
+    for key in [
+        "contextWindow",
+        "maxTokens",
+        "reasoning",
+        "input",
+        "thinking",
+    ] {
+        if existing.get(key).is_none_or(Value::is_null) {
+            if let Some(value) = imported.get(key) {
+                existing.insert(key.to_owned(), value.clone());
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+fn update_existing_provider(value: &Value, imported: &ProviderInput) -> (Value, bool) {
+    let mut value = value.clone();
+    let Some(provider) = value.as_object_mut() else {
+        return (value, false);
+    };
+    let Some(models) = provider.get_mut("models").and_then(Value::as_array_mut) else {
+        return (value, false);
+    };
+    let mut changed = false;
+    for imported_model in &imported.models {
+        if let Some(existing_model) = models.iter_mut().find(|model| {
+            model.get("id").and_then(Value::as_str) == Some(imported_model.id.as_str())
+        }) {
+            changed |= fill_model_details(existing_model, imported_model);
+        }
+    }
+    (value, changed)
+}
+
 fn import_at(
     agent_dir: &Path,
     auth_path: &Path,
@@ -586,6 +899,7 @@ fn import_at(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(ProviderImportResult {
                 imported: Vec::new(),
+                updated: Vec::new(),
                 skipped: Vec::new(),
                 keys_found: 0,
             })
@@ -603,18 +917,37 @@ fn import_at(
         }
     };
     let models_path = agent_dir.join("models.json");
-    let existing = read_snapshot(&models_path)?;
-    let existing_text = snapshot_text(existing.as_ref())?;
+    let existing_snapshot = read_snapshot(&models_path)?;
+    let existing_text = snapshot_text(existing_snapshot.as_ref())?;
     let existing_providers = provider_map(&existing_text)?;
     let mut imported = Vec::new();
+    let mut updated = Vec::new();
     let mut skipped = Vec::new();
     let mut keys_found = 0;
+    let mut working_text = existing_text.clone();
+    let mut existing_changed = false;
+    let mut new_providers = Vec::new();
     for (id, value) in providers {
+        let (input, key) = imported_input(&id, &value)?;
         if existing_providers.contains_key(&id) {
-            skipped.push(id);
+            let existing = jsonc_edit::get_object_path(&working_text, &["providers", &id])?
+                .ok_or_else(|| provider_not_found(&id))?;
+            let (updated_value, changed) = update_existing_provider(&existing, &input);
+            if changed {
+                working_text = replace_provider_value(&working_text, &id, &updated_value)?;
+                existing_changed = true;
+                updated.push(id.clone());
+            } else {
+                skipped.push(id.clone());
+            }
             continue;
         }
-        let (input, key) = imported_input(&id, &value)?;
+        new_providers.push((id, input, key));
+    }
+    if existing_changed {
+        write_models(agent_dir, existing_snapshot.as_ref(), &working_text)?;
+    }
+    for (id, input, key) in new_providers {
         save_at(agent_dir, input)?;
         if let Some(key) = key {
             auth::set_key(auth_path, &id, &key)?;
@@ -624,6 +957,7 @@ fn import_at(
     }
     Ok(ProviderImportResult {
         imported,
+        updated,
         skipped,
         keys_found,
     })
@@ -636,6 +970,156 @@ pub fn import_from_opencode(
     let agent_dir = paths.agent_dir();
     let auth_path = agent_dir.join("auth.json");
     import_at(&agent_dir, &auth_path, opencode_path)
+}
+
+fn validate_provider_json(value: &Value) -> Result<(), AppError> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| invalid("json", "provider JSON must be an object"))?;
+    if object.keys().any(|key| api_key_name(key)) {
+        return Err(invalid("apiKey", "use the key field"));
+    }
+    let base_url = object
+        .get("baseUrl")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("baseUrl", "baseUrl must be a non-empty http or https URL"))?;
+    if base_url.is_empty()
+        || (!base_url.starts_with("http://") && !base_url.starts_with("https://"))
+    {
+        return Err(invalid(
+            "baseUrl",
+            "baseUrl must be a non-empty http or https URL",
+        ));
+    }
+    let api = object
+        .get("api")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("api", "api must be a supported protocol"))?;
+    if !VALID_APIS.contains(&api) {
+        return Err(invalid(
+            "api",
+            "api must be one of: openai-completions, openai-responses, anthropic-messages",
+        ));
+    }
+    let models = object
+        .get("models")
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid("models", "models must be an array of objects"))?;
+    for model in models {
+        let model = model
+            .as_object()
+            .ok_or_else(|| invalid("models", "models must be an array of objects"))?;
+        if model
+            .get("id")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        {
+            return Err(invalid(
+                "models",
+                "each model must have a non-empty string id",
+            ));
+        }
+        for field in ["contextWindow", "maxTokens"] {
+            if let Some(value) = model.get(field) {
+                if positive_u64(Some(value)).is_none() {
+                    return Err(invalid(field, "must be a positive integer"));
+                }
+            }
+        }
+        if let Some(input) = model.get("input") {
+            let Some(input) = input.as_array() else {
+                return Err(invalid("input", "input must contain only text or image"));
+            };
+            if input.iter().any(|value| {
+                !value
+                    .as_str()
+                    .is_some_and(|value| matches!(value, "text" | "image"))
+            }) {
+                return Err(invalid("input", "input must contain only text or image"));
+            }
+        }
+        if let Some(thinking) = model.get("thinking") {
+            let Some(thinking) = thinking.as_object() else {
+                return Err(invalid(
+                    "thinking",
+                    "thinking must be an object with a string mode",
+                ));
+            };
+            if thinking.get("mode").and_then(Value::as_str).is_none() {
+                return Err(invalid(
+                    "thinking",
+                    "thinking must be an object with a string mode",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn provider_json_value(value: &Value) -> Result<Value, AppError> {
+    let mut value = value.clone();
+    let Some(object) = value.as_object_mut() else {
+        return Err(invalid("json", "provider JSON must be an object"));
+    };
+    let api_key_names = object
+        .keys()
+        .filter(|key| api_key_name(key))
+        .cloned()
+        .collect::<Vec<_>>();
+    for key in api_key_names {
+        object.remove(&key);
+    }
+    redact_headers(&mut value);
+    redact_api_keys(&mut value);
+    Ok(value)
+}
+
+fn provider_json_at(agent_dir: &Path, id: &str) -> Result<String, AppError> {
+    let (_, text) = load_models(agent_dir)?;
+    let value = jsonc_edit::get_object_path(&text, &["providers", id])?
+        .ok_or_else(|| provider_not_found(id))?;
+    let value = provider_json_value(&value)?;
+    let mut output = Vec::new();
+    let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");
+    let mut serializer = serde_json::Serializer::with_formatter(&mut output, formatter);
+    value
+        .serialize(&mut serializer)
+        .map_err(|error| AppError::Io {
+            message: error.to_string(),
+        })?;
+    String::from_utf8(output).map_err(|error| AppError::Io {
+        message: error.to_string(),
+    })
+}
+
+fn save_provider_json_at(agent_dir: &Path, id: &str, json: &str) -> Result<SaveResult, AppError> {
+    let (original, text) = load_models(agent_dir)?;
+    let existing = jsonc_edit::get_object_path(&text, &["providers", id])?
+        .ok_or_else(|| provider_not_found(id))?;
+    let mut candidate = parse_provider_json(json)?;
+    validate_provider_json(&candidate)?;
+    restore_redacted_headers(&mut candidate, &existing)?;
+    if let Some((api_key_name, api_key)) = existing
+        .as_object()
+        .and_then(|object| object.iter().find(|(key, _)| api_key_name(key)))
+    {
+        if let Some(object) = candidate.as_object_mut() {
+            object.insert(api_key_name.clone(), api_key.clone());
+        }
+    }
+    if candidate == existing {
+        return write_models(agent_dir, original.as_ref(), &text);
+    }
+    let new_text = replace_provider_value(&text, id, &candidate)?;
+    write_models(agent_dir, original.as_ref(), &new_text)
+}
+
+pub fn provider_json(paths: &Paths, id: &str) -> Result<String, AppError> {
+    provider_json_at(&paths.agent_dir(), id)
+}
+
+pub fn save_provider_json(paths: &Paths, id: &str, json: &str) -> Result<SaveResult, AppError> {
+    save_provider_json_at(&paths.agent_dir(), id, json)
 }
 
 #[cfg(test)]
@@ -668,15 +1152,21 @@ mod tests {
                     id: "model-a".to_owned(),
                     name: Some("Model A".to_owned()),
                     reasoning: Some(false),
+                    input: None,
+                    thinking: None,
                     context_window: Some(4096),
                     max_tokens: Some(1024),
+                    extra: Map::new(),
                 },
                 ProviderModel {
                     id: "model-b".to_owned(),
                     name: None,
                     reasoning: None,
+                    input: None,
+                    thinking: None,
                     context_window: None,
                     max_tokens: None,
+                    extra: Map::new(),
                 },
             ],
             inline_key: false,
@@ -900,7 +1390,7 @@ mod tests {
         let new_text = jsonc_edit::set_object_path(
             &text,
             &["providers", "alpha"],
-            &provider_value(&input("alpha"), None),
+            &provider_value(&input("alpha"), None).expect("provider value"),
         )
         .expect("edit succeeds");
         fs::write(
@@ -952,5 +1442,238 @@ mod tests {
         let result =
             list_at(&agent_dir, &agent_dir.join("auth.json"), &[model]).expect("list succeeds");
         assert!(!result.providers[0].enabled && result.providers[0].known_to_omo);
+    }
+
+    #[test]
+    fn model_extra_input_and_thinking_round_trip() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let agent_dir = agent(root.path());
+        let mut extra = Map::new();
+        extra.insert("cost".to_owned(), serde_json::json!({"input": 1.5}));
+        save_at(
+            &agent_dir,
+            ProviderInput {
+                models: vec![ProviderModel {
+                    id: "model-a".to_owned(),
+                    name: Some("Model A".to_owned()),
+                    reasoning: Some(true),
+                    input: Some(vec!["text".to_owned(), "image".to_owned()]),
+                    thinking: Some(serde_json::json!({
+                        "mode": "effort",
+                        "efforts": ["low", "high"]
+                    })),
+                    context_window: Some(1000),
+                    max_tokens: Some(200),
+                    extra,
+                }],
+                ..input("alpha")
+            },
+        )
+        .expect("save succeeds");
+        let result = list_at(&agent_dir, &agent_dir.join("auth.json"), &[]).expect("list succeeds");
+        let model = &result.providers[0].models[0];
+        let expected_input = vec!["text".to_owned(), "image".to_owned()];
+        assert_eq!(model.input.as_ref(), Some(&expected_input));
+        assert_eq!(
+            model.thinking.as_ref().and_then(|value| value.get("mode")),
+            Some(&Value::String("effort".to_owned()))
+        );
+        assert_eq!(
+            model.extra.get("cost"),
+            Some(&serde_json::json!({"input": 1.5}))
+        );
+    }
+
+    #[test]
+    fn model_headers_are_redacted_in_provider_info() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let agent_dir = agent(root.path());
+        write_models(
+            &agent_dir,
+            r#"{"providers":{"alpha":{"baseUrl":"https://alpha.test","api":"openai-completions","models":[{"id":"a","headers":{"Authorization":"TEST-NOT-A-REAL-KEY"}}]}}}"#,
+        );
+        let result = list_at(&agent_dir, &agent_dir.join("auth.json"), &[]).expect("list succeeds");
+        assert_eq!(
+            result.providers[0].models[0].extra["headers"]["Authorization"],
+            REDACTED
+        );
+    }
+
+    #[test]
+    fn import_maps_limits_modalities_and_variants() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let agent_dir = agent(root.path());
+        let source = root.path().join("opencode.json");
+        fs::write(
+            &source,
+            r#"{"provider":{"alpha":{"options":{"baseURL":"https://alpha.test"},"models":{"a":{"limit":{"context":100,"output":20},"modalities":{"input":["text","audio","image"]},"variants":{"high":{"effort":"high"},"low":{"reasoningEffort":"low"}}}}}}}"#,
+        )
+        .expect("source exists");
+        import_at(&agent_dir, &agent_dir.join("auth.json"), &source).expect("import succeeds");
+        let result = list_at(&agent_dir, &agent_dir.join("auth.json"), &[]).expect("list succeeds");
+        let model = &result.providers[0].models[0];
+        assert_eq!(model.context_window, Some(100));
+        assert_eq!(model.max_tokens, Some(20));
+        let expected_input = vec!["text".to_owned(), "image".to_owned()];
+        assert_eq!(model.input.as_ref(), Some(&expected_input));
+        assert_eq!(model.reasoning, Some(true));
+        assert_eq!(
+            model
+                .thinking
+                .as_ref()
+                .and_then(|value| value.get("efforts")),
+            Some(&serde_json::json!(["low", "high"]))
+        );
+    }
+
+    #[test]
+    fn import_updates_missing_existing_details_without_overwriting() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let agent_dir = agent(root.path());
+        write_models(
+            &agent_dir,
+            r#"{"providers":{"alpha":{"baseUrl":"https://alpha.test","api":"openai-completions","models":[{"id":"a","contextWindow":999}]}}}"#,
+        );
+        let source = root.path().join("opencode.json");
+        fs::write(
+            &source,
+            r#"{"provider":{"alpha":{"options":{"baseURL":"https://alpha.test"},"models":{"a":{"limit":{"context":100,"output":20},"reasoning":true}}}}}"#,
+        )
+        .expect("source exists");
+        let result =
+            import_at(&agent_dir, &agent_dir.join("auth.json"), &source).expect("import succeeds");
+        assert_eq!(result.updated, vec!["alpha"]);
+        let value = jsonc_edit::parse_value(
+            &fs::read_to_string(agent_dir.join("models.json")).expect("models"),
+        )
+        .expect("models parse");
+        assert_eq!(
+            value["providers"]["alpha"]["models"][0]["contextWindow"],
+            999
+        );
+        assert_eq!(value["providers"]["alpha"]["models"][0]["maxTokens"], 20);
+        let second = import_at(&agent_dir, &agent_dir.join("auth.json"), &source)
+            .expect("second import succeeds");
+        assert!(second.updated.is_empty());
+        assert_eq!(second.skipped, vec!["alpha"]);
+    }
+
+    #[test]
+    fn provider_json_redacts_api_key_and_authorization() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let agent_dir = agent(root.path());
+        write_models(
+            &agent_dir,
+            &format!(
+                r#"{{"providers":{{"alpha":{{"apiKey":"{TEST_KEY}","baseUrl":"https://alpha.test","api":"openai-completions","headers":{{"Authorization":"{TEST_KEY}","X-Test":"keep"}},"models":[]}}}}}}"#
+            ),
+        );
+        let json = provider_json_at(&agent_dir, "alpha").expect("provider JSON succeeds");
+        assert!(!json.contains(TEST_KEY));
+        assert!(json.contains(REDACTED));
+        assert!(json.contains("keep"));
+    }
+
+    #[test]
+    fn save_provider_json_restores_key_and_removes_deleted_field() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let agent_dir = agent(root.path());
+        write_models(
+            &agent_dir,
+            &format!(
+                r#"{{"providers":{{"alpha":{{"apiKey":"{TEST_KEY}","baseUrl":"https://alpha.test","api":"openai-completions","headers":{{"Authorization":"{TEST_KEY}"}},"custom":true,"models":[]}}}}}}"#
+            ),
+        );
+        save_provider_json_at(
+            &agent_dir,
+            "alpha",
+            r#"{"baseUrl":"https://new.test","api":"openai-responses","headers":{"Authorization":"<redacted>"},"models":[]}"#,
+        )
+        .expect("provider JSON saves");
+        let value = jsonc_edit::parse_value(
+            &fs::read_to_string(agent_dir.join("models.json")).expect("models"),
+        )
+        .expect("models parse");
+        assert_eq!(value["providers"]["alpha"]["apiKey"], TEST_KEY);
+        assert_eq!(
+            value["providers"]["alpha"]["headers"]["Authorization"],
+            TEST_KEY
+        );
+        assert!(value["providers"]["alpha"].get("custom").is_none());
+    }
+
+    #[test]
+    fn save_provider_json_rejects_api_key_and_non_object_without_echoing_key() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let agent_dir = agent(root.path());
+        write_models(
+            &agent_dir,
+            &format!(
+                r#"{{"providers":{{"alpha":{{"apiKey":"{TEST_KEY}","baseUrl":"https://alpha.test","api":"openai-completions","models":[]}}}}}}"#
+            ),
+        );
+        let error = save_provider_json_at(
+            &agent_dir,
+            "alpha",
+            &format!(r#"{{"apiKey":"{TEST_KEY}","baseUrl":"https://alpha.test","api":"openai-completions","models":[]}}"#),
+        )
+        .expect_err("api key must be rejected");
+        assert!(matches!(error, AppError::InvalidProvider { ref field, .. } if field == "apiKey"));
+        assert!(!error.to_string().contains(TEST_KEY));
+        assert!(matches!(
+            save_provider_json_at(&agent_dir, "alpha", "[]"),
+            Err(AppError::InvalidProvider { field, .. }) if field == "json"
+        ));
+    }
+
+    #[test]
+    fn provider_json_preserves_comments_outside_replaced_provider() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let agent_dir = agent(root.path());
+        let before = "// root\n{\n  \"providers\": {\n    // alpha comment\n    \"alpha\": {\"baseUrl\": \"https://alpha.test\", \"api\": \"openai-completions\", \"models\": []}\n  },\n  // sibling comment\n  \"other\": true\n}\n";
+        write_models(&agent_dir, before);
+        save_provider_json_at(
+            &agent_dir,
+            "alpha",
+            r#"{"baseUrl":"https://new.test","api":"openai-completions","models":[]}"#,
+        )
+        .expect("provider JSON saves");
+        let after = fs::read_to_string(agent_dir.join("models.json")).expect("models");
+        assert!(
+            after.contains("// root")
+                && after.contains("// alpha comment")
+                && after.contains("// sibling comment")
+        );
+    }
+
+    #[test]
+    fn provider_json_unknown_id_returns_provider_not_found() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let agent_dir = agent(root.path());
+        write_models(&agent_dir, r#"{"providers":{}}"#);
+        assert!(matches!(
+            provider_json_at(&agent_dir, "missing"),
+            Err(AppError::ProviderNotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn save_provider_json_validates_model_details() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let agent_dir = agent(root.path());
+        write_models(
+            &agent_dir,
+            r#"{"providers":{"alpha":{"baseUrl":"https://alpha.test","api":"openai-completions","models":[]}}}"#,
+        );
+        let bad_input = r#"{"baseUrl":"https://alpha.test","api":"openai-completions","models":[{"id":"a","input":["audio"]}]}"#;
+        assert!(matches!(
+            save_provider_json_at(&agent_dir, "alpha", bad_input),
+            Err(AppError::InvalidProvider { field, .. }) if field == "input"
+        ));
+        let bad_thinking = r#"{"baseUrl":"https://alpha.test","api":"openai-completions","models":[{"id":"a","thinking":true}]}"#;
+        assert!(matches!(
+            save_provider_json_at(&agent_dir, "alpha", bad_thinking),
+            Err(AppError::InvalidProvider { field, .. }) if field == "thinking"
+        ));
     }
 }

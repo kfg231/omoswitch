@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn usage() -> &'static str {
-    "usage: omoswitch-cli <status|list|import|preview|apply|models|catalog|backups|providers|provider-add|provider-enable|provider-disable|provider-key|provider-test|provider-models|providers-import>"
+    "usage: omoswitch-cli <status|list|import|preview|apply|models|catalog|backups|providers|provider-add|provider-enable|provider-disable|provider-key|provider-json|provider-json-set|provider-test|provider-models|providers-import>"
 }
 
 fn arg_value(args: &[String], name: &str) -> Result<String, AppError> {
@@ -53,8 +53,11 @@ fn provider_models(args: &[String]) -> Result<Vec<ProviderModel>, AppError> {
                 id: model_id.clone(),
                 name: None,
                 reasoning: None,
+                input: None,
+                thinking: None,
                 context_window: None,
                 max_tokens: None,
+                extra: serde_json::Map::new(),
             });
             index += 2;
         } else {
@@ -102,6 +105,16 @@ fn read_stdin_key() -> Result<String, AppError> {
             message: error.to_string(),
         })?;
     Ok(key.trim_end().to_owned())
+}
+
+fn read_stdin_json() -> Result<String, AppError> {
+    let mut json = String::new();
+    std::io::stdin()
+        .read_to_string(&mut json)
+        .map_err(|error| AppError::Io {
+            message: error.to_string(),
+        })?;
+    Ok(json)
 }
 
 fn run(args: &[String]) -> Result<String, AppError> {
@@ -204,6 +217,21 @@ fn run(args: &[String]) -> Result<String, AppError> {
             let key = read_stdin_key()?;
             omoswitch_lib::auth::set_key(&paths.auth_json_path(), id, &key)?;
             json_value(&serde_json::json!({"ok": true, "id": id}))
+        }
+        "provider-json" => {
+            let id = provider_id(args)?;
+            providers::provider_json(&paths, id)
+        }
+        "provider-json-set" => {
+            let id = provider_id(args)?;
+            if !args.iter().any(|arg| arg == "--stdin") {
+                return Err(AppError::InvalidProvider {
+                    message: "JSON input must use stdin".to_owned(),
+                    field: "stdin".to_owned(),
+                });
+            }
+            providers::save_provider_json(&paths, id, &read_stdin_json()?)?;
+            json_value(&provider_info(&paths, id)?)
         }
         "provider-test" => {
             let id = provider_id(args)?;
