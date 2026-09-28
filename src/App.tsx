@@ -131,6 +131,12 @@ export default function App() {
     [report],
   );
 
+  // knownToOmo is derived from the omo model cache, so it must be re-queried after provider edits.
+  const refreshModelsAfterProviderChange = useCallback(async (): Promise<void> => {
+    await loadModels(true);
+    await refreshProviders();
+  }, [loadModels, refreshProviders]);
+
   const loadCatalog = useCallback(
     async (refresh: boolean): Promise<NativeCatalog | null> => {
       try {
@@ -278,6 +284,7 @@ export default function App() {
     try {
       const saved = await api.saveProvider(input);
       await refreshProviders();
+      void refreshModelsAfterProviderChange();
       setEditorError(null);
       setError(null);
       if (editor?.isNew === true) {
@@ -295,6 +302,7 @@ export default function App() {
       replaceEditorInitial(await api.setProviderKey(id, key));
       setEditorError(null);
       await refreshProviders();
+      void refreshModelsAfterProviderChange();
     } catch (cause) {
       setEditorError(toAppError(cause));
     }
@@ -305,6 +313,7 @@ export default function App() {
       replaceEditorInitial(await api.clearProviderKey(id));
       setEditorError(null);
       await refreshProviders();
+      void refreshModelsAfterProviderChange();
     } catch (cause) {
       setEditorError(toAppError(cause));
     }
@@ -337,6 +346,7 @@ export default function App() {
       replaceEditorInitial(await api.saveProviderJson(id, json));
       setEditorError(null);
       await refreshProviders();
+      void refreshModelsAfterProviderChange();
     } catch (cause) {
       setEditorError(toAppError(cause));
       throw cause;
@@ -550,6 +560,7 @@ export default function App() {
             void run(async () => {
               await api.setProviderEnabled(id, enabled);
               await refreshProviders();
+              void refreshModelsAfterProviderChange();
             })
           }
           onTest={(id) => void testProvider(id)}
@@ -563,6 +574,7 @@ export default function App() {
               await api.deleteProvider(id);
               setProbes((current) => ({ ...current, [id]: undefined }));
               await refreshProviders();
+              void refreshModelsAfterProviderChange();
             });
           }}
           onAdd={() => openEditor({ initial: null, isNew: true })}
@@ -570,6 +582,7 @@ export default function App() {
             void run(async () => {
               const result = await api.importProvidersFromOpencode();
               await refreshProviders();
+              void refreshModelsAfterProviderChange();
               setNotice({
                 key: "provider.importResult",
                 params: {
