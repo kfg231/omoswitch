@@ -62,7 +62,11 @@ export function AssignmentRow({
   const extraPanelId = useId();
 
   function update(next: Partial<typeof parts>): void {
-    onChange(mergeAssignment({ ...parts, ...next }, order));
+    const merged = mergeAssignment({ ...parts, ...next }, order);
+    onChange(merged);
+    // Sync extraText to reflect the current merged assignment's extra fields
+    const updatedParts = splitAssignment(merged);
+    setExtraText(stringifyExtra(updatedParts.extra));
   }
 
   function commitExtra(raw: string): void {
