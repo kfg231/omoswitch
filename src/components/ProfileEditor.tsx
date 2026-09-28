@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { KNOWN_AGENTS, KNOWN_CATEGORIES } from "../lib/catalog";
 import { validateProfileInput, type ValidationErrors } from "../lib/assignment";
-import type { Assignment, ModelInfo, Profile, ProfileInput } from "../lib/types";
+import type { Assignment, ModelInfo, Profile, ProfileInput, ProviderInfo } from "../lib/types";
 import { AssignmentRow } from "./AssignmentRow";
 import { Button, Field, Panel, SectionHeading, TextArea, TextInput } from "./primitives";
 
@@ -10,9 +10,11 @@ export interface ProfileEditorProps {
   profile: Profile | null;
   profiles: readonly Profile[];
   models: readonly ModelInfo[];
+  providers: readonly ProviderInfo[];
   omoAvailable: boolean;
   onSave: (input: ProfileInput) => void;
   onRefreshModels: () => void;
+  onConfigureProvider: (providerId: string) => void;
 }
 
 interface Draft {
@@ -40,9 +42,11 @@ export function ProfileEditor({
   profile,
   profiles,
   models,
+  providers,
   omoAvailable,
   onSave,
   onRefreshModels,
+  onConfigureProvider,
 }: ProfileEditorProps) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState<Draft>(() => draftOf(profile));
@@ -203,6 +207,7 @@ export function ProfileEditor({
                       section={section.id}
                       assignment={assignment}
                       models={models}
+                      providers={providers}
                       omoAvailable={omoAvailable}
                       keyError={
                         errors[`${section.id}.${key}`] === undefined
@@ -217,6 +222,7 @@ export function ProfileEditor({
                       onChange={(next) => setEntry(section.id, key, next)}
                       onRemove={() => removeEntry(section.id, key)}
                       onRefreshModels={onRefreshModels}
+                      onConfigureProvider={onConfigureProvider}
                     />
                   ))}
                 </ul>

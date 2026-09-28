@@ -1,13 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type ImportSource } from "./lib/api";
+import { getPreset } from "./lib/providerCatalog";
 import type {
   AppError,
   BackupInfo,
+  FetchedModels,
   ImportResult,
   ModelInfo,
+  ProbeResult,
   Profile,
   ProfileInput,
+  ProviderInfo,
+  ProviderInput,
+  ProvidersResult,
   Status,
   SwitchPreview as SwitchPreviewData,
 } from "./lib/types";
@@ -17,14 +23,26 @@ import { ErrorBanner, isAppError } from "./components/ErrorBanner";
 import { ImportDialog } from "./components/ImportDialog";
 import { ProfileEditor } from "./components/ProfileEditor";
 import { ProfileList } from "./components/ProfileList";
+import { ProviderEditor } from "./components/ProviderEditor";
+import { ProviderList } from "./components/ProviderList";
 import { StatusBar } from "./components/StatusBar";
 import { SwitchPreview } from "./components/SwitchPreview";
+import { Panel, SectionHeading } from "./components/primitives";
 
 const POLL_MS = 3000;
+
+type View = "profiles" | "providers";
+const VIEWS: readonly View[] = ["profiles", "providers"];
 
 interface Notice {
   key: string;
   params?: Record<string, string>;
+}
+
+interface EditorState {
+  initial: ProviderInfo | null;
+  prefillId?: string;
+  isNew: boolean;
 }
 
 function toAppError(cause: unknown): AppError {
@@ -32,11 +50,31 @@ function toAppError(cause: unknown): AppError {
   return { kind: "io", message: cause instanceof Error ? cause.message : String(cause) };
 }
 
+function placeholderProvider(id: string): ProviderInfo {
+  return {
+    id,
+    name: id,
+    baseUrl: "",
+    api: "openai-completions",
+    models: [],
+    enabled: true,
+    hasKey: false,
+    keySource: "none",
+    inlineKey: false,
+    knownToOmo: false,
+  };
+}
+
 export default function App() {
   const { t, i18n } = useTranslation();
+  const [view, setView] = useState<View>("profiles");
   const [status, setStatus] = useState<Status | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [providersResult, setProvidersResult] = useState<ProvidersResult | null>(null);
+  const [probes, setProbes] = useState<Record<string, ProbeResult | "pending" | undefined>>({});
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [editorError, setEditorError] = useState<AppError | null>(null);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preview, setPreview] = useState<SwitchPreviewData | null>(null);
@@ -45,6 +83,9 @@ export default function App() {
   const [error, setError] = useState<AppError | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  const tabRefs = useRef<Record<View, HTMLButtonElement | null>>({ profiles: null, providers: null });
+
+  const providers = providersResult?.providers ?? [];
 
   const report = useCallback((cause: unknown): void => {
     setError(toAppError(cause));
@@ -53,6 +94,14 @@ export default function App() {
   const refreshStatus = useCallback(async (): Promise<void> => {
     try {
       setStatus(await api.getStatus());
+    } catch (cause) {
+      report(cause);
+    }
+  }, [report]);
+
+  const refreshProviders = useCallback(async (): Promise<void> => {
+    try {
+      setProvidersResult(await api.listProviders());
     } catch (cause) {
       report(cause);
     }
@@ -84,19 +133,23 @@ export default function App() {
         report(cause);
       }
       await refreshStatus();
+      await refreshProviders();
       await loadModels(false);
     })();
-  }, [loadModels, refreshProfiles, refreshStatus, report]);
+  }, [loadModels, refreshProfiles, refreshProviders, refreshStatus, report]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => void refreshStatus(), POLL_MS);
-    const onFocus = (): void => void refreshStatus();
-    window.addEventListener("focus", onFocus);
+    const tick = (): void => {
+      void refreshStatus();
+      void refreshProviders();
+    };
+    const timer = window.setInterval(tick, POLL_MS);
+    window.addEventListener("focus", tick);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", tick);
     };
-  }, [refreshStatus]);
+  }, [refreshProviders, refreshStatus]);
 
   const openPreview = useCallback(
     async (id: string): Promise<void> => {
@@ -149,9 +202,113 @@ export default function App() {
     setLanguage(lang);
   }
 
+  function selectView(next: View, focus = false): void {
+    setView(next);
+    if (focus) tabRefs.current[next]?.focus();
+  }
+
+  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>): void {
+    const focused = VIEWS.find((tab) => tabRefs.current[tab] === event.currentTarget) ?? view;
+    const index = VIEWS.indexOf(focused);
+    let next: View | undefined;
+    if (event.key === "ArrowRight") next = VIEWS[(index + 1) % VIEWS.length];
+    else if (event.key === "ArrowLeft") next = VIEWS[(index - 1 + VIEWS.length) % VIEWS.length];
+    else if (event.key === "Home") next = VIEWS[0];
+    else if (event.key === "End") next = VIEWS[VIEWS.length - 1];
+    if (next === undefined) return;
+    event.preventDefault();
+    selectView(next, true);
+  }
+
+  function openEditor(state: EditorState): void {
+    setEditorError(null);
+    setEditor(state);
+  }
+
+  function configureProvider(providerId: string): void {
+    setView("providers");
+    const existing = providers.find((provider) => provider.id === providerId);
+    if (existing !== undefined) {
+      openEditor({ initial: existing, isNew: false });
+    } else if (getPreset(providerId) !== undefined) {
+      openEditor({ initial: null, prefillId: providerId, isNew: true });
+    } else {
+      openEditor({ initial: placeholderProvider(providerId), isNew: true });
+    }
+  }
+
+  function replaceEditorInitial(info: ProviderInfo): void {
+    setEditor((current) => (current === null ? current : { ...current, initial: info }));
+  }
+
+  async function saveProvider(input: ProviderInput): Promise<void> {
+    try {
+      const saved = await api.saveProvider(input);
+      await refreshProviders();
+      setEditorError(null);
+      setError(null);
+      if (editor?.isNew === true) {
+        setEditor({ initial: saved, isNew: false });
+      } else {
+        setEditor(null);
+      }
+    } catch (cause) {
+      setEditorError(toAppError(cause));
+    }
+  }
+
+  async function setProviderKey(id: string, key: string): Promise<void> {
+    try {
+      replaceEditorInitial(await api.setProviderKey(id, key));
+      setEditorError(null);
+      await refreshProviders();
+    } catch (cause) {
+      setEditorError(toAppError(cause));
+    }
+  }
+
+  async function clearProviderKey(id: string): Promise<void> {
+    try {
+      replaceEditorInitial(await api.clearProviderKey(id));
+      setEditorError(null);
+      await refreshProviders();
+    } catch (cause) {
+      setEditorError(toAppError(cause));
+    }
+  }
+
+  async function fetchProviderModels(id: string): Promise<FetchedModels> {
+    try {
+      const result = await api.fetchProviderModels(id);
+      setEditorError(null);
+      return result;
+    } catch (cause) {
+      setEditorError(toAppError(cause));
+      throw cause;
+    }
+  }
+
+  async function testProvider(id: string): Promise<void> {
+    setProbes((current) => ({ ...current, [id]: "pending" }));
+    try {
+      const result = await api.testProvider(id);
+      setProbes((current) => ({ ...current, [id]: result }));
+    } catch (cause) {
+      setProbes((current) => ({ ...current, [id]: undefined }));
+      report(cause);
+    }
+  }
+
   const activeProfile =
     profiles.find((profile) => profile.id === status?.activeProfileId) ?? null;
   const selected = profiles.find((profile) => profile.id === selectedId) ?? null;
+
+  const tabClass = (tab: View): string =>
+    `rounded-md px-3 py-1.5 text-xs font-medium transition-colors duration-150 ease-ui ${
+      view === tab
+        ? "bg-ink-50 text-ink-900 shadow-sm ring-1 ring-ink-200 dark:bg-ink-800 dark:text-ink-50 dark:ring-ink-700"
+        : "text-ink-600 hover:bg-ink-200/70 dark:text-ink-300 dark:hover:bg-ink-800/60"
+    }`;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-3">
@@ -175,6 +332,38 @@ export default function App() {
           })
         }
       />
+
+      <div
+        role="tablist"
+        aria-orientation="horizontal"
+        className="flex w-fit gap-1 rounded-lg bg-ink-100 p-1 ring-1 ring-ink-200 dark:bg-ink-950/60 dark:ring-ink-800"
+      >
+        {VIEWS.map((tab) => (
+          <button
+            key={tab}
+            ref={(node) => {
+              tabRefs.current[tab] = node;
+            }}
+            type="button"
+            role="tab"
+            id={`view-tab-${tab}`}
+            aria-selected={view === tab}
+            aria-controls={`view-panel-${tab}`}
+            tabIndex={view === tab ? 0 : -1}
+            data-testid={`view-tab-${tab}`}
+            onClick={() => selectView(tab)}
+            onKeyDown={onTabKeyDown}
+            className={tabClass(tab)}
+          >
+            {tab === "profiles" ? t("profileList.title") : t("provider.title")}
+            {tab === "providers" && providersResult !== null ? (
+              <span className="ml-1.5 text-micro text-ink-500 tabular-nums dark:text-ink-400">
+                {providers.length}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
 
       {error !== null ? (
         <ErrorBanner
@@ -200,7 +389,13 @@ export default function App() {
         </p>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[22rem_1fr]">
+      <div
+        role="tabpanel"
+        id="view-panel-profiles"
+        aria-labelledby="view-tab-profiles"
+        hidden={view !== "profiles"}
+        className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[22rem_1fr]"
+      >
         <ProfileList
           profiles={profiles}
           selectedId={selectedId}
@@ -247,8 +442,10 @@ export default function App() {
             profile={selected}
             profiles={profiles}
             models={models}
+            providers={providers}
             omoAvailable={status?.omoAvailable ?? true}
             onRefreshModels={() => void loadModels(true)}
+            onConfigureProvider={configureProvider}
             onSave={(input: ProfileInput) =>
               void run(async () => {
                 const saved = await api.saveProfile(input);
@@ -260,6 +457,89 @@ export default function App() {
           />
         )}
       </div>
+
+      <div
+        role="tabpanel"
+        id="view-panel-providers"
+        aria-labelledby="view-tab-providers"
+        hidden={view !== "providers"}
+        className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[1fr_22rem]"
+      >
+        <ProviderList
+          providers={providers}
+          probes={probes}
+          onToggle={(id, enabled) =>
+            void run(async () => {
+              await api.setProviderEnabled(id, enabled);
+              await refreshProviders();
+            })
+          }
+          onTest={(id) => void testProvider(id)}
+          onEdit={(id) => {
+            const target = providers.find((provider) => provider.id === id);
+            if (target !== undefined) openEditor({ initial: target, isNew: false });
+          }}
+          onDelete={(id) => {
+            if (!window.confirm(t("provider.deleteConfirm", { id }))) return;
+            void run(async () => {
+              await api.deleteProvider(id);
+              setProbes((current) => ({ ...current, [id]: undefined }));
+              await refreshProviders();
+            });
+          }}
+          onAdd={() => openEditor({ initial: null, isNew: true })}
+          onImport={() =>
+            void run(async () => {
+              const result = await api.importProvidersFromOpencode();
+              await refreshProviders();
+              setNotice({
+                key: "provider.importResult",
+                params: {
+                  imported: String(result.imported.length),
+                  skipped: String(result.skipped.length),
+                },
+              });
+            })
+          }
+        />
+
+        <Panel className="flex flex-col gap-3 px-4 py-3">
+          <SectionHeading>{t("provider.count", { count: providers.length })}</SectionHeading>
+          <dl className="flex flex-col gap-2 text-xs">
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-micro font-medium tracking-wide text-ink-500 uppercase dark:text-ink-400">
+                {t("provider.agentDir")}
+              </dt>
+              <dd className="font-mono break-all text-ink-800 dark:text-ink-100">
+                {providersResult?.agentDir ?? t("common.loading")}
+              </dd>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-micro font-medium tracking-wide text-ink-500 uppercase dark:text-ink-400">
+                {t("provider.modelsJsonPath")}
+              </dt>
+              <dd className="font-mono break-all text-ink-800 dark:text-ink-100">
+                {providersResult?.modelsJsonPath ?? t("common.loading")}
+              </dd>
+            </div>
+          </dl>
+        </Panel>
+      </div>
+
+      <ProviderEditor
+        open={editor !== null}
+        initial={editor?.initial ?? null}
+        prefillId={editor?.prefillId}
+        error={editorError}
+        onClose={() => {
+          setEditor(null);
+          setEditorError(null);
+        }}
+        onSave={saveProvider}
+        onSetKey={setProviderKey}
+        onClearKey={clearProviderKey}
+        onFetchModels={fetchProviderModels}
+      />
 
       {preview !== null ? (
         <SwitchPreview

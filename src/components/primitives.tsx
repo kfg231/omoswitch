@@ -1,5 +1,6 @@
 import type {
   ButtonHTMLAttributes,
+  HTMLAttributes,
   InputHTMLAttributes,
   ReactNode,
   SelectHTMLAttributes,
@@ -131,10 +132,16 @@ const BADGE_TONES: Record<BadgeTone, string> = {
   bad: "bg-bad-500/15 text-bad-500",
 };
 
-export function Badge({ tone = "neutral", children }: { tone?: BadgeTone; children: ReactNode }) {
+export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
+  tone?: BadgeTone;
+  children: ReactNode;
+}
+
+export function Badge({ tone = "neutral", className = "", children, ...rest }: BadgeProps) {
   return (
     <span
-      className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-micro font-medium ${BADGE_TONES[tone]}`}
+      {...rest}
+      className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-micro font-medium ${BADGE_TONES[tone]} ${className}`}
     >
       {children}
     </span>

@@ -15,6 +15,10 @@ const KNOWN_KINDS: readonly AppErrorKind[] = [
   "profileNotFound",
   "invalidProfile",
   "notAnObject",
+  "providerNotFound",
+  "invalidProvider",
+  "networkUnreachable",
+  "modelFetchParse",
 ];
 
 export function isAppError(value: unknown): value is AppError {

@@ -1,12 +1,15 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ModelInfo } from "../lib/types";
-import { Button } from "./primitives";
+import { mergeModelOptions } from "../lib/deadReference";
+import type { ModelInfo, ProviderInfo } from "../lib/types";
+import { ImeSafeInput } from "./ImeSafeInput";
+import { Badge, Button } from "./primitives";
 
 export interface ModelPickerProps {
   id: string;
   value: string;
   models: readonly ModelInfo[];
+  providers: readonly ProviderInfo[];
   omoAvailable: boolean;
   describedBy?: string;
   onChange: (value: string) => void;
@@ -17,6 +20,7 @@ export function ModelPicker({
   id,
   value,
   models,
+  providers,
   omoAvailable,
   describedBy,
   onChange,
@@ -25,47 +29,64 @@ export function ModelPicker({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
+  // What the user is typing; filters the list without waiting for an IME commit.
+  const [query, setQuery] = useState(value);
+  // Bumped after a pick so ImeSafeInput remounts with the picked value instead of a stale draft.
+  const [revision, setRevision] = useState(0);
   const listId = useId();
-  const wrapperRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const composingRef = useRef(false);
+  const pickingRef = useRef(false);
+  const suppressOpenRef = useRef(false);
+
+  const options = useMemo(() => mergeModelOptions(models, providers), [models, providers]);
 
   const matches = useMemo(() => {
-    const needle = value.trim().toLowerCase();
-    if (needle === "") return models.slice(0, 40);
-    return models.filter((model) => model.id.toLowerCase().includes(needle)).slice(0, 40);
-  }, [models, value]);
+    const needle = query.trim().toLowerCase();
+    if (needle === "") return options.slice(0, 40);
+    return options.filter((option) => option.id.toLowerCase().includes(needle)).slice(0, 40);
+  }, [options, query]);
 
   useEffect(() => {
-    setHighlight(0);
+    if (document.activeElement !== inputRef.current) setQuery(value);
   }, [value]);
 
   useEffect(() => {
-    if (!open) return;
-    function onPointerDown(event: MouseEvent): void {
-      const wrapper = wrapperRef.current;
-      if (wrapper !== null && event.target instanceof Node && !wrapper.contains(event.target)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [open]);
+    setHighlight(0);
+  }, [query]);
+
+  useEffect(() => {
+    if (revision === 0) return;
+    pickingRef.current = false;
+    inputRef.current?.focus();
+  }, [revision]);
 
   const hint = omoAvailable ? t("modelPicker.freeTextHint") : t("modelPicker.omoMissingHint");
   const hintId = `${listId}-hint`;
   const activeId = open && matches[highlight] !== undefined ? `${listId}-opt-${highlight}` : undefined;
 
-  function commit(next: string): void {
+  function push(next: string): void {
+    if (pickingRef.current || next === value) return;
     onChange(next);
+  }
+
+  function pick(next: string): void {
+    onChange(next);
+    pickingRef.current = true;
+    suppressOpenRef.current = true;
+    setQuery(next);
     setOpen(false);
+    setRevision((current) => current + 1);
   }
 
   return (
-    <div ref={wrapperRef} className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1">
       <div className="flex items-center gap-1.5">
         <div className="relative flex-1">
-          <input
+          <ImeSafeInput
+            key={revision}
+            ref={inputRef}
             id={id}
-            type="text"
             role="combobox"
             autoComplete="off"
             aria-expanded={open}
@@ -75,12 +96,31 @@ export function ModelPicker({
             aria-describedby={[describedBy, hintId].filter((entry) => entry !== undefined).join(" ")}
             value={value}
             placeholder={t("editor.fallbackPlaceholder")}
-            onChange={(event) => {
-              onChange(event.target.value);
+            className="font-mono text-xs"
+            onCommit={push}
+            onInput={(event) => {
+              const next = event.currentTarget.value;
+              setQuery(next);
+              setOpen(true);
+              if (!composingRef.current) push(next);
+            }}
+            onCompositionStartCapture={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEndCapture={(event) => {
+              composingRef.current = false;
+              push(event.currentTarget.value);
+            }}
+            onFocusCapture={() => {
+              if (suppressOpenRef.current) {
+                suppressOpenRef.current = false;
+                return;
+              }
               setOpen(true);
             }}
-            onFocus={() => setOpen(true)}
+            onBlur={() => setOpen(false)}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || composingRef.current) return;
               if (event.key === "ArrowDown") {
                 event.preventDefault();
                 setOpen(true);
@@ -94,20 +134,20 @@ export function ModelPicker({
                 const picked = matches[highlight];
                 if (picked !== undefined) {
                   event.preventDefault();
-                  commit(picked.id);
+                  pick(picked.id);
                 }
               } else if (event.key === "Escape" && open) {
                 event.stopPropagation();
                 setOpen(false);
               }
             }}
-            className="w-full rounded-md bg-ink-50 px-2.5 py-1.5 font-mono text-xs text-ink-800 ring-1 ring-ink-200 transition-colors duration-150 ease-ui placeholder:text-ink-400 hover:ring-ink-300 dark:bg-ink-900 dark:text-ink-100 dark:ring-ink-700 dark:placeholder:text-ink-500 dark:hover:ring-ink-600"
           />
           {open ? (
             <ul
               id={listId}
               role="listbox"
               aria-label={t("modelPicker.title")}
+              onMouseDown={(event) => event.preventDefault()}
               className="rounded-panel absolute z-30 mt-1 max-h-64 w-full overflow-y-auto bg-ink-50 py-1 shadow-xl ring-1 ring-ink-300 dark:bg-ink-800 dark:ring-ink-700"
             >
               {matches.length === 0 ? (
@@ -115,25 +155,35 @@ export function ModelPicker({
                   {t("modelPicker.empty")}
                 </li>
               ) : (
-                matches.map((model, index) => (
+                matches.map((option, index) => (
                   <li
-                    key={model.id}
+                    key={`${option.source}:${option.id}`}
                     id={`${listId}-opt-${index}`}
                     role="option"
-                    aria-selected={model.id === value}
+                    aria-selected={option.id === value}
+                    data-source={option.source}
                     onMouseEnter={() => setHighlight(index)}
                     onMouseDown={(event) => {
                       event.preventDefault();
-                      commit(model.id);
+                      pick(option.id);
                     }}
-                    className={`flex cursor-pointer items-baseline justify-between gap-3 px-2.5 py-1.5 font-mono text-xs ${
+                    className={`flex cursor-pointer items-center justify-between gap-3 px-2.5 py-1.5 font-mono text-xs ${
                       index === highlight
                         ? "bg-ink-200/80 text-ink-900 dark:bg-ink-700 dark:text-ink-50"
                         : "text-ink-700 dark:text-ink-200"
                     }`}
                   >
-                    <span>{model.id}</span>
-                    <span className="text-micro text-ink-500 dark:text-ink-400">{model.context}</span>
+                    <span className="min-w-0 truncate">{option.id}</span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      {option.context !== null ? (
+                        <span className="text-micro text-ink-500 dark:text-ink-400">{option.context}</span>
+                      ) : null}
+                      <Badge tone={option.source === "configured" ? "accent" : "neutral"}>
+                        {option.source === "configured"
+                          ? t("provider.sourceConfigured")
+                          : t("provider.sourceOmo")}
+                      </Badge>
+                    </span>
                   </li>
                 ))
               )}

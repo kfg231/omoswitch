@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { mergeAssignment, splitAssignment } from "../lib/assignment";
+import { findDeadProviders } from "../lib/deadReference";
 import {
   REASONING_LEVELS,
   isNativeAgent,
@@ -9,7 +10,8 @@ import {
   legacyAgentTarget,
   legacyCategoryTarget,
 } from "../lib/catalog";
-import type { Assignment, ModelInfo } from "../lib/types";
+import type { Assignment, ModelInfo, ProviderInfo } from "../lib/types";
+import { ImeSafeInput } from "./ImeSafeInput";
 import { ModelPicker } from "./ModelPicker";
 import { Badge, Button, Field, IconButton, Select, TextArea, TextInput } from "./primitives";
 
@@ -18,7 +20,9 @@ export interface AssignmentRowProps {
   section: "agents" | "categories";
   assignment: Assignment;
   models: readonly ModelInfo[];
+  providers: readonly ProviderInfo[];
   omoAvailable: boolean;
+  onConfigureProvider: (providerId: string) => void;
   keyError?: string;
   modelError?: string;
   onChange: (next: Assignment) => void;
@@ -35,7 +39,9 @@ export function AssignmentRow({
   section,
   assignment,
   models,
+  providers,
   omoAvailable,
+  onConfigureProvider,
   keyError,
   modelError,
   onChange,
@@ -48,6 +54,16 @@ export function AssignmentRow({
   const [extraText, setExtraText] = useState(() => stringifyExtra(parts.extra));
   const [extraError, setExtraError] = useState(false);
   const [fallbackDraft, setFallbackDraft] = useState("");
+  const [fallbackRevision, setFallbackRevision] = useState(0);
+  const fallbackRef = useRef<HTMLInputElement>(null);
+  const refocusFallback = useRef(false);
+
+  useEffect(() => {
+    if (refocusFallback.current) {
+      refocusFallback.current = false;
+      fallbackRef.current?.focus();
+    }
+  }, [fallbackRevision]);
 
   function update(next: Partial<typeof parts>): void {
     onChange(mergeAssignment({ ...parts, ...next }, order));
@@ -73,12 +89,21 @@ export function AssignmentRow({
     }
   }
 
-  function addFallback(): void {
-    const value = fallbackDraft.trim();
+  function addFallback(raw: string, refocus: boolean): void {
+    const value = raw.trim();
     if (value === "") return;
     setFallbackDraft("");
+    // Remount the IME-safe input so its internal draft resets to empty.
+    refocusFallback.current = refocus;
+    setFallbackRevision((current) => current + 1);
     update({ models: [...parts.models, value] });
   }
+
+  const deadProviders = findDeadProviders(
+    [parts.model, ...parts.models],
+    models,
+    providers,
+  );
 
   const known = section === "agents" ? isNativeAgent(entryKey) : isNativeCategory(entryKey);
   const legacyTarget =
@@ -121,6 +146,7 @@ export function AssignmentRow({
                 describedBy={field["aria-describedby"]}
                 value={parts.model}
                 models={models}
+                providers={providers}
                 omoAvailable={omoAvailable}
                 onChange={(model) => update({ model })}
                 onRefresh={onRefreshModels}
@@ -154,25 +180,51 @@ export function AssignmentRow({
         </IconButton>
       </div>
 
+      {deadProviders.map((providerId) => (
+        <div
+          key={providerId}
+          role="status"
+          data-testid={`dead-reference-${providerId}`}
+          className="mt-3 flex flex-wrap items-center gap-3 rounded-md bg-warn-500/12 px-3 py-2"
+        >
+          <p className="min-w-0 flex-1 text-xs text-ink-700 dark:text-ink-200">
+            <span aria-hidden="true" className="mr-1.5 font-semibold text-warn-500">
+              !
+            </span>
+            {t("provider.deadReference", { provider: providerId })}
+          </p>
+          <Button
+            size="sm"
+            variant="primary"
+            data-testid={`configure-provider-${providerId}`}
+            onClick={() => onConfigureProvider(providerId)}
+          >
+            {t("provider.configureProvider")}
+          </Button>
+        </div>
+      ))}
+
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <Field label={t("editor.fallbackModels")} labelHidden={false}>
             {(field) => (
               <div className="flex items-center gap-1.5">
-                <TextInput
+                <ImeSafeInput
                   {...field}
+                  key={fallbackRevision}
+                  ref={fallbackRef}
                   value={fallbackDraft}
                   placeholder={t("editor.fallbackPlaceholder")}
                   className="font-mono text-xs"
-                  onChange={(event) => setFallbackDraft(event.target.value)}
+                  onCommit={setFallbackDraft}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") {
+                    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
                       event.preventDefault();
-                      addFallback();
+                      addFallback(event.currentTarget.value, true);
                     }
                   }}
                 />
-                <Button size="sm" onClick={addFallback}>
+                <Button size="sm" onClick={() => addFallback(fallbackDraft, false)}>
                   {t("editor.addFallback")}
                 </Button>
               </div>
