@@ -211,6 +211,7 @@
     "key": "APIキー",
     "keyPlaceholder": "APIキーを入力（保存後に再表示されません）",
     "keySet": "設定済み",
+    "keySavedWithProvider": "キーは「保存」を押すとプロバイダと一緒に保存されます。",
     "keyNotSet": "未設定",
     "clearKey": "キーを消去",
     "saveKey": "キーを保存",

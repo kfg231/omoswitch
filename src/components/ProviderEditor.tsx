@@ -13,7 +13,8 @@ export interface ProviderEditorProps {
   prefillId?: string;
   saved?: boolean;
   onClose: () => void;
-  onSave: (input: ProviderInput) => Promise<void>;
+  /** `key` is only passed for a provider that is not saved yet; it is stored right after the provider. */
+  onSave: (input: ProviderInput, key?: string) => Promise<void>;
   onSetKey: (id: string, key: string) => Promise<void>;
   onClearKey: (id: string) => Promise<void>;
   onFetchModels: (id: string) => Promise<FetchedModels>;
@@ -158,22 +159,26 @@ export function ProviderEditor({
 
   async function handleSave(): Promise<void> {
     setSaving(true);
+    const pendingKey = keyInput.trim();
     try {
-      await onSave({
-        id: draft.id,
-        name: draft.name,
-        baseUrl: draft.baseUrl,
-        api: draft.api,
-        models: draft.models,
-        inlineKey: draft.inlineKey,
-      });
+      await onSave(
+        {
+          id: draft.id,
+          name: draft.name,
+          baseUrl: draft.baseUrl,
+          api: draft.api,
+          models: draft.models,
+          inlineKey: draft.inlineKey,
+        },
+        !persisted && pendingKey !== "" ? pendingKey : undefined,
+      );
     } finally {
       setSaving(false);
     }
   }
 
   async function handleSetKey(): Promise<void> {
-    if (!initial || keyInput.trim() === "") return;
+    if (!initial || !persisted || keyInput.trim() === "") return;
     setKeyOperating(true);
     try {
       await onSetKey(initial.id, keyInput.trim());
@@ -203,7 +208,10 @@ export function ProviderEditor({
     }
   }
 
-  const jsonAvailable = initial !== null && saved;
+  // A provider that exists in models.json. New providers and dead-reference placeholders do not,
+  // so their key is collected here and stored together with the provider on save.
+  const persisted = initial !== null && saved;
+  const jsonAvailable = persisted;
   const jsonDirty = jsonText !== jsonBase;
 
   async function loadJson(): Promise<void> {
@@ -506,18 +514,23 @@ export function ProviderEditor({
                   value={keyInput}
                   onChange={(e) => setKeyInput(e.target.value)}
                   placeholder={t("provider.keyPlaceholder")}
-                  disabled={!providerExists || keyOperating}
+                  disabled={keyOperating}
                   className="w-full rounded-md bg-ink-50 px-2.5 py-1.5 text-sm text-ink-800 ring-1 ring-ink-200 transition-colors duration-150 ease-ui placeholder:text-ink-400 hover:ring-ink-300 focus:outline-none focus:ring-2 focus:ring-accent-500 disabled:opacity-60 dark:bg-ink-900 dark:text-ink-100 dark:ring-ink-700 dark:placeholder:text-ink-500 dark:hover:ring-ink-600 dark:focus:ring-accent-400"
                   data-testid="provider-key-input"
                 />
               )}
             </Field>
             {hasKeySet && <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">{t("provider.keySet")}</p>}
+            {!persisted && (
+              <p className="mt-1 text-xs text-ink-500 dark:text-ink-400" data-testid="provider-key-on-save">
+                {t("provider.keySavedWithProvider")}
+              </p>
+            )}
             <div className="mt-2 flex gap-2">
               <Button
                 size="sm"
                 onClick={handleSetKey}
-                disabled={!providerExists || keyInput.trim() === "" || keyOperating}
+                disabled={!persisted || keyInput.trim() === "" || keyOperating}
                 data-testid="provider-key-save"
               >
                 {t("provider.saveKey")}
@@ -526,7 +539,7 @@ export function ProviderEditor({
                 size="sm"
                 variant="danger"
                 onClick={handleClearKey}
-                disabled={!providerExists || !hasKeySet || keyOperating}
+                disabled={!persisted || !hasKeySet || keyOperating}
                 data-testid="provider-key-clear"
               >
                 {t("provider.clearKey")}

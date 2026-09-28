@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { editProvider, openApp, openProvidersView, providerRow, setKeyPresent } from "./helpers";
+import { editProvider, openApp, openProvidersView, providerDialog, providerRow, setKeyPresent } from "./helpers";
 
 const TEST_KEY = "TEST-NOT-A-REAL-KEY";
 
@@ -44,6 +44,47 @@ test("setting a key shows the key-set badge and never renders the key", async ({
   const reopened = await editProvider(page, "openrouter");
   await expect(reopened.getByLabel("APIキー")).toHaveValue("");
   expect(await page.content()).not.toContain(TEST_KEY);
+});
+
+test("a key typed while adding a new provider is saved with the provider", async ({ page }) => {
+  await openApp(page);
+  await openProvidersView(page);
+
+  await page.getByRole("button", { name: "プロバイダを追加" }).click();
+  const dialog = providerDialog(page, "add");
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("ID", { exact: true }).fill("mykey-provider");
+  await dialog.getByLabel("ベースURL").fill("https://api.example.com/v1");
+
+  const keyInput = dialog.getByLabel("APIキー");
+  await expect(keyInput).toBeEnabled();
+  await expect(keyInput).toHaveAttribute("type", "password");
+  await keyInput.fill(TEST_KEY);
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
+
+  const editDialog = providerDialog(page, "edit");
+  await expect(editDialog).toBeVisible();
+  await expect(editDialog.getByLabel("APIキー")).toHaveValue("");
+  await expect(editDialog.getByText("設定済み", { exact: true })).toBeVisible();
+  await expect(editDialog.getByRole("button", { name: "キーを消去" })).toBeEnabled();
+  await expect(page.getByTestId("provider-key-badge-mykey-provider")).toHaveText("設定済み (auth.json)");
+  expect(await page.content()).not.toContain(TEST_KEY);
+});
+
+test("adding a new provider without a key leaves it key-not-set", async ({ page }) => {
+  await openApp(page);
+  await openProvidersView(page);
+
+  await page.getByRole("button", { name: "プロバイダを追加" }).click();
+  const dialog = providerDialog(page, "add");
+  await dialog.getByLabel("ID", { exact: true }).fill("nokey-provider");
+  await dialog.getByLabel("ベースURL").fill("https://api.example.com/v1");
+  // ImeSafeInput commits on blur; leave the field so the draft picks up the URL.
+  await dialog.getByLabel("ベースURL").blur();
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
+
+  await expect(providerDialog(page, "edit")).toBeVisible();
+  await expect(page.getByTestId("provider-key-badge-nokey-provider")).toHaveText("未設定");
 });
 
 test("clearing a key returns the provider to key-not-set", async ({ page }) => {

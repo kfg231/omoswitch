@@ -82,7 +82,7 @@ describe("ProviderEditor", () => {
     expect(container.textContent).not.toContain("TEST-NOT-A-REAL-KEY");
   });
 
-  it("disables key operations when provider does not exist (initial is null)", () => {
+  it("accepts a key for a new provider and passes it to onSave (initial is null)", async () => {
     const onClose = vi.fn();
     const onSave = vi.fn();
     const onSetKey = vi.fn();
@@ -108,9 +108,22 @@ describe("ProviderEditor", () => {
     const clearKeyButton = screen.getByTestId("provider-key-clear") as HTMLButtonElement;
     const fetchModelsButton = screen.getByTestId("provider-fetch-models") as HTMLButtonElement;
 
-    expect(keyInput.disabled).toBe(true);
+    // The key can be typed before the provider exists; it is stored together with the provider.
+    expect(keyInput.disabled).toBe(false);
     expect(saveKeyButton.disabled).toBe(true);
     expect(clearKeyButton.disabled).toBe(true);
     expect(fetchModelsButton.disabled).toBe(true);
+
+    fireEvent.change(screen.getByTestId("provider-id"), { target: { value: "new-provider" } });
+    fireEvent.blur(screen.getByTestId("provider-id"));
+    fireEvent.change(screen.getByTestId("provider-baseurl"), { target: { value: "https://api.test.com" } });
+    fireEvent.blur(screen.getByTestId("provider-baseurl"));
+    fireEvent.change(keyInput, { target: { value: " TEST-NOT-A-REAL-KEY " } });
+    fireEvent.click(screen.getByTestId("provider-save"));
+
+    await vi.waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ id: "new-provider" }), "TEST-NOT-A-REAL-KEY");
+    });
+    expect(onSetKey).not.toHaveBeenCalled();
   });
 });

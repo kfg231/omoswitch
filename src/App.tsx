@@ -280,9 +280,21 @@ export default function App() {
     setEditor((current) => (current === null ? current : { ...current, initial: info }));
   }
 
-  async function saveProvider(input: ProviderInput): Promise<void> {
+  async function saveProvider(input: ProviderInput, key?: string): Promise<void> {
     try {
-      const saved = await api.saveProvider(input);
+      let saved = await api.saveProvider(input);
+      // A key typed before the provider existed is stored once the provider is saved.
+      if (key !== undefined) {
+        try {
+          saved = await api.setProviderKey(saved.id, key);
+        } catch (keyCause) {
+          // The provider itself was saved: switch to edit mode so the key can be retried there.
+          await refreshProviders();
+          setEditor({ initial: saved, isNew: false });
+          setEditorError(toAppError(keyCause));
+          return;
+        }
+      }
       await refreshProviders();
       void refreshModelsAfterProviderChange();
       setEditorError(null);

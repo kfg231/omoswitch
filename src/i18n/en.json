@@ -211,6 +211,7 @@
     "key": "API key",
     "keyPlaceholder": "Enter API key (it will not be shown again)",
     "keySet": "Key set",
+    "keySavedWithProvider": "The key is saved together with the provider when you click Save.",
     "keyNotSet": "Not set",
     "clearKey": "Clear key",
     "saveKey": "Save key",
