@@ -44,8 +44,8 @@ test("editing context window, efforts and image input persists after reopening",
 
   await card.getByRole("switch", { name: "推論（llama3.3）" }).click();
   const efforts = card.getByRole("group", { name: "推論強度（llama3.3）" });
-  await efforts.getByRole("checkbox", { name: "最小", exact: true }).uncheck();
-  await efforts.getByRole("checkbox", { name: "最大", exact: true }).check();
+  await efforts.getByRole("checkbox", { name: "minimal", exact: true }).uncheck();
+  await efforts.getByRole("checkbox", { name: "max", exact: true }).check();
 
   const inputs = card.getByRole("group", { name: "入力モダリティ（llama3.3）" });
   await inputs.getByRole("checkbox", { name: "テキスト" }).check();
@@ -59,10 +59,10 @@ test("editing context window, efforts and image input persists after reopening",
   await expect(again.getByLabel("コンテキストウィンドウ（llama3.3）")).toHaveValue("1000000");
   await expect(again.getByLabel("最大出力トークン（llama3.3）")).toHaveValue("32000");
   const againEfforts = again.getByRole("group", { name: "推論強度（llama3.3）" });
-  await expect(againEfforts.getByRole("checkbox", { name: "最小", exact: true })).not.toBeChecked();
-  await expect(againEfforts.getByRole("checkbox", { name: "高", exact: true })).toBeChecked();
-  await expect(againEfforts.getByRole("checkbox", { name: "最高", exact: true })).not.toBeChecked();
-  await expect(againEfforts.getByRole("checkbox", { name: "最大", exact: true })).toBeChecked();
+  await expect(againEfforts.getByRole("checkbox", { name: "minimal", exact: true })).not.toBeChecked();
+  await expect(againEfforts.getByRole("checkbox", { name: "high", exact: true })).toBeChecked();
+  await expect(againEfforts.getByRole("checkbox", { name: "xhigh", exact: true })).not.toBeChecked();
+  await expect(againEfforts.getByRole("checkbox", { name: "max", exact: true })).toBeChecked();
   await expect(again.getByRole("checkbox", { name: "画像" })).toBeChecked();
   await expect(again.getByRole("switch", { name: "推論（llama3.3）" })).toHaveAttribute("aria-checked", "true");
 
@@ -136,7 +136,7 @@ test("the JSON tab previews unsaved form edits and does not write them until sav
 
   await card.getByRole("switch", { name: "推論（llama3.3）" }).click();
   const efforts = card.getByRole("group", { name: "推論強度（llama3.3）" });
-  await efforts.getByRole("checkbox", { name: "最小", exact: true }).uncheck();
+  await efforts.getByRole("checkbox", { name: "minimal", exact: true }).uncheck();
 
   const json = await openJsonTab(page, dialog);
   const preview = JSON.parse(await json.inputValue()) as { models: Record<string, unknown>[] };

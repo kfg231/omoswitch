@@ -136,14 +136,14 @@
     "images": "Images"
   },
   "reasoning": {
-    "off": "Off",
-    "minimal": "Minimal",
-    "low": "Low",
-    "medium": "Medium",
-    "high": "High",
-    "xhigh": "Extra high",
-    "max": "Max",
-    "auto": "Auto",
+    "off": "off",
+    "minimal": "minimal",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "max",
+    "auto": "auto",
     "unset": "Unset"
   },
   "preview": {
