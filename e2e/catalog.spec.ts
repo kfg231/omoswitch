@@ -78,7 +78,7 @@ test("fetching the latest definitions adds rows for newly reported agents", asyn
   await expect(page.getByTestId("catalog-source")).toHaveText("定義: omo 5.0.1");
 });
 
-test("a failed definitions fetch is reported and leaves the rows untouched", async ({ page }) => {
+test("a failed definitions fetch is reported and falls back to the built-in rows", async ({ page }) => {
   await openApp(page);
   await setCatalog(page, "fail");
   await startNewProfile(page);

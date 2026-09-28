@@ -130,6 +130,20 @@ pub async fn get_native_catalog(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn latest_omo_version() -> Option<String> {
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(5)))
+        .build()
+        .new_agent();
+    let mut response = agent
+        .get("https://registry.npmjs.org/omo-ai/latest")
+        .call()
+        .ok()?;
+    let body: Value = serde_json::from_str(&response.body_mut().read_to_string().ok()?).ok()?;
+    body.get("version")?.as_str().map(str::to_owned)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn list_backups(state: State<'_, AppState>) -> Result<Vec<BackupInfo>, AppError> {
     omo_config::list_backups(&state.paths)
 }

@@ -43,6 +43,7 @@ pub fn run() {
             commands::apply_profile,
             commands::list_models,
             commands::get_native_catalog,
+            commands::latest_omo_version,
             commands::list_backups,
             commands::restore_backup,
             commands::list_providers,

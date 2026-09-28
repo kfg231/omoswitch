@@ -567,6 +567,8 @@ export function installMockIpc(): OmoswitchMockControls {
         return backend.listModels(arg<boolean>(payload, "refresh"));
       case "get_native_catalog":
         return backend.getNativeCatalog(arg<boolean>(payload, "refresh"));
+      case "latest_omo_version":
+        return null;
       case "list_backups":
         return backend.listBackups();
       case "restore_backup":

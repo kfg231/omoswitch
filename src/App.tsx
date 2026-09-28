@@ -75,6 +75,7 @@ export default function App() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [catalog, setCatalog] = useState<NativeCatalog>(BUILTIN_CATALOG);
+  const [latestOmoVersion, setLatestOmoVersion] = useState<string | null>(null);
   const [providersResult, setProvidersResult] = useState<ProvidersResult | null>(null);
   const [probes, setProbes] = useState<Record<string, ProbeResult | "pending" | undefined>>({});
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -154,6 +155,7 @@ export default function App() {
       await refreshProviders();
       await loadCatalog(false);
       await loadModels(false);
+      setLatestOmoVersion(await api.latestOmoVersion().catch(() => null));
     })();
   }, [loadCatalog, loadModels, refreshProfiles, refreshProviders, refreshStatus, report]);
 
@@ -486,6 +488,7 @@ export default function App() {
             providers={providers}
             omoAvailable={status?.omoAvailable ?? true}
             catalog={catalog}
+            latestOmoVersion={latestOmoVersion}
             onRefreshModels={() => loadModels(true)}
             onFetchCatalog={() => loadCatalog(true)}
             onConfigureProvider={configureProvider}

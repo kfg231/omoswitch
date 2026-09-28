@@ -100,6 +100,7 @@
     "catalogSourceInstalled": "omo {{version}}",
     "catalogSourceCache": "omo {{version}} (cached)",
     "catalogSourceBuiltin": "built-in",
+    "omoUpdateAvailable": "omo {{version}} is available (run omo update, then refetch definitions)",
     "catalogVersionUnknown": "unknown version",
     "catalogFetched": "Fetched from {{source}}: {{agents}} agents / {{categories}} categories ({{added}} rows added)"
   },

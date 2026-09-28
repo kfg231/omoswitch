@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { splitAssignment, validateProfileInput, type ValidationErrors } from "../lib/assignment";
+import { BUILTIN_CATALOG } from "../lib/catalog";
 import type {
   Assignment,
   ModelInfo,
@@ -20,6 +21,7 @@ export interface ProfileEditorProps {
   providers: readonly ProviderInfo[];
   omoAvailable: boolean;
   catalog: NativeCatalog;
+  latestOmoVersion?: string | null;
   onSave: (input: ProfileInput) => void;
   onRefreshModels: () => Promise<void>;
   onFetchCatalog: () => Promise<NativeCatalog | null>;
@@ -115,6 +117,7 @@ export function ProfileEditor({
   providers,
   omoAvailable,
   catalog,
+  latestOmoVersion = null,
   onSave,
   onRefreshModels,
   onFetchCatalog,
@@ -163,8 +166,7 @@ export function ProfileEditor({
   async function fetchDefinitions(): Promise<void> {
     setFetching(true);
     try {
-      const next = await onFetchCatalog();
-      if (next === null) return;
+      const next = (await onFetchCatalog()) ?? BUILTIN_CATALOG;
       const added = countMissing(draft.agents, next.agents) + countMissing(draft.categories, next.categories);
       if (added > 0) {
         setDraft((current) => ({
@@ -221,6 +223,11 @@ export function ProfileEditor({
             <span data-testid="catalog-source" className="text-micro text-ink-500 dark:text-ink-400">
               {t("editor.catalogSource", { source: catalogSourceLabel(catalog, t) })}
             </span>
+            {latestOmoVersion !== null && catalog.omoVersion !== null && latestOmoVersion !== catalog.omoVersion ? (
+              <span data-testid="omo-update" className="text-micro text-warn-500">
+                {t("editor.omoUpdateAvailable", { version: latestOmoVersion })}
+              </span>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {dirty ? (

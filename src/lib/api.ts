@@ -37,6 +37,7 @@ export const api = {
     invoke<ApplyResult>("apply_profile", expectedHash === undefined ? { id } : { id, expectedHash }),
   listModels: (refresh: boolean) => invoke<ModelInfo[]>("list_models", { refresh }),
   getNativeCatalog: (refresh: boolean) => invoke<NativeCatalog>("get_native_catalog", { refresh }),
+  latestOmoVersion: () => invoke<string | null>("latest_omo_version"),
   listBackups: () => invoke<BackupInfo[]>("list_backups"),
   restoreBackup: (path: string) => invoke<ApplyResult>("restore_backup", { path }),
   listProviders: () => invoke<ProvidersResult>("list_providers"),
