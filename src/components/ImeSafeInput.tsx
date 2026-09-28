@@ -2,7 +2,7 @@ import type { InputHTMLAttributes } from "react";
 import { forwardRef, useEffect, useRef, useState } from "react";
 
 const CONTROL =
-  "w-full rounded-md bg-ink-50 px-2.5 py-1.5 text-sm text-ink-800 ring-1 ring-ink-200 transition-colors duration-150 ease-ui placeholder:text-ink-400 hover:ring-ink-300 focus:outline-none focus:ring-2 focus:ring-accent-500 disabled:opacity-60 dark:bg-ink-900 dark:text-ink-100 dark:ring-ink-700 dark:placeholder:text-ink-500 dark:hover:ring-ink-600 dark:focus:ring-accent-400";
+  "w-full min-h-8 rounded-md bg-white px-2.5 py-1.5 text-sm text-ink-900 ring-1 ring-ink-300 transition-colors duration-150 ease-ui placeholder:text-ink-400 hover:ring-ink-400 focus:outline-none focus:ring-2 focus:ring-accent-500 disabled:opacity-60 dark:bg-ink-950 dark:text-ink-50 dark:ring-ink-700 dark:placeholder:text-ink-500 dark:hover:ring-ink-600 dark:focus:ring-accent-400";
 
 interface ImeSafeInputProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "defaultValue"> {

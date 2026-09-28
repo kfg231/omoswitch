@@ -115,7 +115,7 @@ export function ModelPicker({
             aria-describedby={[describedBy, hintId].filter((entry) => entry !== undefined).join(" ")}
             value={value}
             placeholder={t("editor.fallbackPlaceholder")}
-            className="font-mono text-xs"
+            className="font-mono"
             onCommit={push}
             onInput={(event) => {
               const next = event.currentTarget.value;
@@ -193,7 +193,7 @@ export function ModelPicker({
                         event.preventDefault();
                         pick(option.id);
                       }}
-                      className={`flex cursor-pointer items-center justify-between gap-3 px-2.5 py-1.5 font-mono text-xs ${
+                      className={`flex cursor-pointer items-center justify-between gap-3 px-2.5 py-1.5 font-mono text-sm ${
                         index === highlight
                           ? "bg-ink-200/80 text-ink-900 dark:bg-ink-700 dark:text-ink-50"
                           : option.id === value
@@ -228,17 +228,27 @@ export function ModelPicker({
           ) : null}
         </div>
         <Button
-          size="sm"
           disabled={refreshing}
           aria-busy={refreshing}
+          aria-label={refreshing ? t("modelPicker.refreshing") : t("modelPicker.refresh")}
+          title={t("modelPicker.refresh")}
+          size="icon"
           onClick={() => void refresh()}
         >
-          {refreshing ? t("modelPicker.refreshing") : t("modelPicker.refresh")}
+          <span aria-hidden="true" className={refreshing ? "animate-spin" : ""}>
+            ↻
+          </span>
         </Button>
       </div>
       <p
         id={hintId}
-        className={`text-micro ${omoAvailable ? "text-ink-500 dark:text-ink-400" : "text-warn-500"}`}
+        className={
+          omoAvailable
+            ? open
+              ? "text-micro text-ink-500 dark:text-ink-400"
+              : "sr-only"
+            : "text-micro text-warn-700 dark:text-warn-300"
+        }
       >
         {hint}
       </p>

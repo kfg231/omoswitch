@@ -140,6 +140,7 @@ class MockBackend {
   private backups: BackupInfo[] = [];
   private activeProfileId: string | null = null;
   private drifted = false;
+  private fileNative = nativeText(null);
   private omoMissing = false;
   private nextId = 3;
   private providerProbes = new Map<string, ProbeResult | "fail">();
@@ -204,11 +205,16 @@ class MockBackend {
       configPath: CONFIG_PATH,
       configExists: true,
       activeProfileId: this.activeProfileId,
-      drift: active === null ? "noActive" : this.drifted ? "drifted" : "inSync",
+      drift:
+        active === null
+          ? "noActive"
+          : this.drifted || this.fileNative !== nativeText(active)
+            ? "drifted"
+            : "inSync",
       nativeBlockPresent: active !== null,
       legacySenpiPresent: true,
       omoAvailable: !this.omoMissing,
-      configHash: hashOf(nativeText(active)),
+      configHash: hashOf(this.fileNative),
       agentDir: AGENT_DIR,
       modelsJsonPresent: true,
       providerCount: this.providers.length,
@@ -301,12 +307,13 @@ class MockBackend {
     const captured = this.importFromConfig("native", `Captured ${nowIso()}`).profile;
     this.activeProfileId = captured.id;
     this.drifted = false;
+    this.fileNative = nativeText(captured);
     return captured;
   }
 
   previewSwitch(id: string): SwitchPreview {
     const target = this.find(id);
-    const before = nativeText(this.active());
+    const before = this.fileNative;
     const after = nativeText(target);
     return {
       profileId: id,
@@ -319,7 +326,7 @@ class MockBackend {
 
   applyProfile(id: string, expectedHash?: string): ApplyResult {
     const target = this.find(id);
-    const before = nativeText(this.active());
+    const before = this.fileNative;
     if (expectedHash !== undefined && expectedHash !== hashOf(before)) {
       fail("changedOnDisk", "omo.jsonc changed since preview");
     }
@@ -335,6 +342,7 @@ class MockBackend {
     ];
     this.activeProfileId = id;
     this.drifted = false;
+    this.fileNative = after;
     return { changed: true, backupPath, configPath: CONFIG_PATH };
   }
 
@@ -355,6 +363,7 @@ class MockBackend {
     this.backups = [{ path: backupPath, createdAt: nowIso(), sizeBytes: 2048 }, ...this.backups];
     this.activeProfileId = null;
     this.drifted = false;
+    this.fileNative = nativeText(null);
     return { changed: true, backupPath, configPath: CONFIG_PATH };
   }
 

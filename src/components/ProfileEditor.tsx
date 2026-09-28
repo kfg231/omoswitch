@@ -11,10 +11,28 @@ import type {
   ProfileInput,
   ProviderInfo,
 } from "../lib/types";
-import { AssignmentRow } from "./AssignmentRow";
+import { ASSIGNMENT_GRID, AssignmentRow } from "./AssignmentRow";
 import { Button, Field, Panel, SectionHeading, TextArea, TextInput } from "./primitives";
 
+export type ApplyState = "new" | "synced" | "pending" | "drifted" | "inactive";
+
+const APPLY_STATE_TONE: Record<Exclude<ApplyState, "new">, string> = {
+  synced: "bg-good-500/12 text-good-700 dark:text-good-300",
+  pending: "bg-warn-500/14 text-warn-700 dark:text-warn-300",
+  drifted: "bg-warn-500/14 text-warn-700 dark:text-warn-300",
+  inactive: "bg-ink-200/70 text-ink-700 dark:bg-ink-800 dark:text-ink-200",
+};
+
+const APPLY_STATE_GLYPH: Record<Exclude<ApplyState, "new">, string> = {
+  synced: "✓",
+  pending: "!",
+  drifted: "!",
+  inactive: "○",
+};
+
 export interface ProfileEditorProps {
+  applyState?: ApplyState;
+  onApply?: () => void;
   profile: Profile | null;
   profiles: readonly Profile[];
   models: readonly ModelInfo[];
@@ -111,6 +129,8 @@ function catalogSourceLabel(catalog: NativeCatalog, t: TFunction): string {
 }
 
 export function ProfileEditor({
+  applyState = "new",
+  onApply,
   profile,
   profiles,
   models,
@@ -224,14 +244,14 @@ export function ProfileEditor({
               {t("editor.catalogSource", { source: catalogSourceLabel(catalog, t) })}
             </span>
             {latestOmoVersion !== null && catalog.omoVersion !== null && latestOmoVersion !== catalog.omoVersion ? (
-              <span data-testid="omo-update" className="text-micro text-warn-500">
+              <span data-testid="omo-update" className="text-micro text-warn-700 dark:text-warn-300">
                 {t("editor.omoUpdateAvailable", { version: latestOmoVersion })}
               </span>
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {dirty ? (
-              <span className="text-micro text-warn-500">{t("editor.unsaved")}</span>
+              <span className="text-sm font-medium text-warn-700 dark:text-warn-300">{t("editor.unsaved")}</span>
             ) : null}
             <Button
               size="sm"
@@ -256,6 +276,30 @@ export function ProfileEditor({
                 added: fetchStatus.added,
               })}
         </p>
+        {applyState === "new" ? null : (
+          <div
+            data-testid="apply-state"
+            data-state={applyState}
+            className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg px-3 py-2 text-sm ${APPLY_STATE_TONE[applyState]}`}
+          >
+            <span aria-hidden="true" className="font-semibold">
+              {APPLY_STATE_GLYPH[applyState]}
+            </span>
+            <span className="min-w-0 flex-1 font-medium">
+              {t(`applyState.${applyState}`)}
+              {dirty ? (
+                <span className="ml-2 font-normal text-ink-600 dark:text-ink-300">
+                  {t("applyState.dirtyHint")}
+                </span>
+              ) : null}
+            </span>
+            {applyState !== "synced" && onApply !== undefined ? (
+              <Button size="sm" variant="primary" disabled={dirty} onClick={onApply}>
+                {t("applyState.applyNow")}
+              </Button>
+            ) : null}
+          </div>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -324,9 +368,19 @@ export function ProfileEditor({
               </div>
 
               {entries.length === 0 ? (
-                <p className="mt-2 text-xs text-ink-500 dark:text-ink-400">{section.empty}</p>
+                <p className="mt-2 text-sm text-ink-500 dark:text-ink-400">{section.empty}</p>
               ) : (
-                <ul className="mt-2 flex flex-col gap-2" data-testid={`${section.id}-rows`}>
+                <>
+                <div
+                  aria-hidden="true"
+                  className={`mt-3 hidden gap-x-3 px-3 text-xs font-medium text-ink-500 sm:grid dark:text-ink-400 ${ASSIGNMENT_GRID}`}
+                >
+                  <span>{t("editor.key")}</span>
+                  <span>{t("editor.model")}</span>
+                  <span>{t("editor.reasoning")}</span>
+                  <span />
+                </div>
+                <ul className="mt-1.5 flex flex-col gap-2" data-testid={`${section.id}-rows`}>
                   {entries.map(([key, assignment]) => (
                     <AssignmentRow
                       key={key}
@@ -354,6 +408,7 @@ export function ProfileEditor({
                     />
                   ))}
                 </ul>
+                </>
               )}
             </div>
           );

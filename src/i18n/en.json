@@ -37,6 +37,7 @@
     "configInvalid": "omo.jsonc cannot be parsed",
     "inSync": "In sync",
     "drifted": "File has been modified",
+    "pending": "Unwritten changes",
     "nativeBlockPresent": "[native] block present",
     "nativeBlockAbsent": "No [native] block",
     "legacySenpi": "A legacy [senpi] block is present (never edited)",
@@ -55,6 +56,7 @@
     "new": "New profile",
     "importFromConfig": "Import from config",
     "activeBadge": "Active",
+    "appliedButton": "Applied",
     "agentsCount": "{{count}} agents",
     "categoriesCount": "{{count}} categories",
     "updatedAt": "Updated {{value}}",
@@ -102,7 +104,19 @@
     "catalogSourceBuiltin": "built-in",
     "omoUpdateAvailable": "omo {{version}} is available (run omo update, then refetch definitions)",
     "catalogVersionUnknown": "unknown version",
-    "catalogFetched": "Fetched from {{source}}: {{agents}} agents / {{categories}} categories ({{added}} rows added)"
+    "catalogFetched": "Fetched from {{source}}: {{agents}} agents / {{categories}} categories ({{added}} rows added)",
+    "extraShort": "Extra settings",
+    "extraEmpty": "none",
+    "extraCount": "{{count}} keys",
+    "extraErrorBadge": "Error"
+  },
+  "applyState": {
+    "synced": "This profile is written to omo.jsonc",
+    "pending": "Saved changes are not written to omo.jsonc yet",
+    "drifted": "omo.jsonc no longer matches this profile",
+    "inactive": "This profile is not the one in omo.jsonc",
+    "dirtyHint": "Edits reach omo.jsonc once you save and then write them",
+    "applyNow": "Write to omo.jsonc"
   },
   "modelPicker": {
     "title": "Pick a model",

@@ -37,6 +37,7 @@
     "configInvalid": "omo.jsonc を解析できません",
     "inSync": "同期済み",
     "drifted": "ファイルが変更されています",
+    "pending": "未反映の変更あり",
     "nativeBlockPresent": "[native] ブロックあり",
     "nativeBlockAbsent": "[native] ブロックなし",
     "legacySenpi": "[senpi] ブロックが残っています（編集しません）",
@@ -55,6 +56,7 @@
     "new": "新規プロファイル",
     "importFromConfig": "設定から取り込む",
     "activeBadge": "適用中",
+    "appliedButton": "適用済み",
     "agentsCount": "エージェント {{count}} 件",
     "categoriesCount": "カテゴリ {{count}} 件",
     "updatedAt": "更新 {{value}}",
@@ -102,7 +104,19 @@
     "catalogSourceBuiltin": "内蔵",
     "omoUpdateAvailable": "omo {{version}} が公開されています（omo update 後に定義を再取得）",
     "catalogVersionUnknown": "バージョン不明",
-    "catalogFetched": "{{source}} から取得: エージェント {{agents}} / カテゴリ {{categories}}（{{added}} 行追加）"
+    "catalogFetched": "{{source}} から取得: エージェント {{agents}} / カテゴリ {{categories}}（{{added}} 行追加）",
+    "extraShort": "その他の設定",
+    "extraEmpty": "なし",
+    "extraCount": "{{count}} 項目",
+    "extraErrorBadge": "エラー"
+  },
+  "applyState": {
+    "synced": "このプロファイルは omo.jsonc に反映済みです",
+    "pending": "保存した変更が omo.jsonc にまだ反映されていません",
+    "drifted": "omo.jsonc の内容がこのプロファイルと食い違っています",
+    "inactive": "このプロファイルは現在 omo.jsonc に反映されていません",
+    "dirtyHint": "編集内容は、保存してから反映すると omo.jsonc に書き込まれます",
+    "applyNow": "omo.jsonc に反映する"
   },
   "modelPicker": {
     "title": "モデルを選択",

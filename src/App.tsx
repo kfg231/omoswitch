@@ -24,7 +24,7 @@ import { setLanguage, type Lang } from "./i18n";
 import { BackupsDialog } from "./components/BackupsDialog";
 import { ErrorBanner, isAppError } from "./components/ErrorBanner";
 import { ImportDialog } from "./components/ImportDialog";
-import { ProfileEditor } from "./components/ProfileEditor";
+import { ProfileEditor, type ApplyState } from "./components/ProfileEditor";
 import { ProfileList } from "./components/ProfileList";
 import { ProviderEditor } from "./components/ProviderEditor";
 import { ProviderList } from "./components/ProviderList";
@@ -33,6 +33,7 @@ import { SwitchPreview } from "./components/SwitchPreview";
 import { Panel, SectionHeading } from "./components/primitives";
 
 const POLL_MS = 3000;
+const NOTICE_MS = 6000;
 
 type View = "profiles" | "providers";
 const VIEWS: readonly View[] = ["profiles", "providers"];
@@ -88,6 +89,7 @@ export default function App() {
   const [error, setError] = useState<AppError | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingApplyId, setPendingApplyId] = useState<string | null>(null);
   const tabRefs = useRef<Record<View, HTMLButtonElement | null>>({ profiles: null, providers: null });
 
   const providers = providersResult?.providers ?? [];
@@ -171,6 +173,16 @@ export default function App() {
       window.removeEventListener("focus", tick);
     };
   }, [refreshProviders, refreshStatus]);
+
+  useEffect(() => {
+    if (status !== null && status.drift !== "drifted") setPendingApplyId(null);
+  }, [status]);
+
+  useEffect(() => {
+    if (notice === null) return;
+    const timer = window.setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   const openPreview = useCallback(
     async (id: string): Promise<void> => {
@@ -345,9 +357,21 @@ export default function App() {
   const activeProfile =
     profiles.find((profile) => profile.id === status?.activeProfileId) ?? null;
   const selected = profiles.find((profile) => profile.id === selectedId) ?? null;
+  const pending =
+    status?.drift === "drifted" &&
+    status.activeProfileId !== null &&
+    pendingApplyId === status.activeProfileId;
+
+  function applyStateOf(profile: Profile | null): ApplyState {
+    if (profile === null) return "new";
+    if (status === null || profile.id !== status.activeProfileId) return "inactive";
+    if (status.drift === "inSync") return "synced";
+    if (pending) return "pending";
+    return "drifted";
+  }
 
   const tabClass = (tab: View): string =>
-    `rounded-md px-3 py-1.5 text-xs font-medium transition-colors duration-150 ease-ui ${
+    `rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors duration-150 ease-ui ${
       view === tab
         ? "bg-ink-50 text-ink-900 shadow-sm ring-1 ring-ink-200 dark:bg-ink-800 dark:text-ink-50 dark:ring-ink-700"
         : "text-ink-600 hover:bg-ink-200/70 dark:text-ink-300 dark:hover:bg-ink-800/60"
@@ -358,6 +382,7 @@ export default function App() {
       <StatusBar
         status={status}
         activeProfile={activeProfile}
+        pending={pending}
         lang={(i18n.resolvedLanguage === "en" ? "en" : "ja") satisfies Lang}
         onLangChange={changeLang}
         onReapply={() => {
@@ -423,14 +448,16 @@ export default function App() {
         />
       ) : null}
 
-      {notice !== null ? (
-        <p
-          aria-live="polite"
-          className="rounded-panel bg-good-500/12 px-4 py-2 text-xs text-ink-700 dark:text-ink-200"
-        >
-          {t(notice.key, notice.params)}
-        </p>
-      ) : null}
+      <div aria-live="polite" className="pointer-events-none fixed right-4 bottom-4 z-40 max-w-md">
+        {notice !== null ? (
+          <p className="pointer-events-auto flex items-start gap-2 rounded-lg bg-ink-900 px-4 py-3 text-sm text-ink-50 shadow-lg ring-1 ring-ink-800 dark:bg-ink-50 dark:text-ink-900 dark:ring-ink-200">
+            <span aria-hidden="true" className="font-semibold text-good-300 dark:text-good-700">
+              ✓
+            </span>
+            <span className="min-w-0 break-all">{t(notice.key, notice.params)}</span>
+          </p>
+        ) : null}
+      </div>
 
       <div
         role="tabpanel"
@@ -443,6 +470,7 @@ export default function App() {
           profiles={profiles}
           selectedId={selectedId}
           activeProfileId={status?.activeProfileId ?? null}
+          drift={status?.drift ?? null}
           onSelect={setSelectedId}
           onApply={(id) => void openPreview(id)}
           onNew={() => setSelectedId(null)}
@@ -483,6 +511,8 @@ export default function App() {
           <ProfileEditor
             key={selected?.id ?? "new"}
             profile={selected}
+            applyState={applyStateOf(selected)}
+            onApply={selected === null ? undefined : () => void openPreview(selected.id)}
             profiles={profiles}
             models={models}
             providers={providers}
@@ -495,9 +525,11 @@ export default function App() {
             onSave={(input: ProfileInput) =>
               void run(async () => {
                 const saved = await api.saveProfile(input);
+                if (saved.id === status?.activeProfileId) setPendingApplyId(saved.id);
                 await refreshProfiles();
                 setSelectedId(saved.id);
                 setNotice({ key: "editor.saved" });
+                await refreshStatus();
               })
             }
           />

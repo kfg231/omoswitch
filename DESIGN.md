@@ -21,10 +21,12 @@ Defined in `src/index.css` under `@theme`. Consumed only as Tailwind utilities
 
 - Ink ramp `ink-50 … ink-950`: the only neutral. Surfaces, text, borders, and every
   hover/selected/active wash are this one ink at different steps or alphas.
-- Accent `accent-400/500/600`: warm amber. Reserved for the active profile marker, primary
-  actions, and the `focus-visible` ring. Never a decorative fill.
-- Semantic `good-500` (in sync), `warn-500` (drift, legacy `[senpi]`), `bad-500` (errors).
-  Semantic colors appear as a dot, a text color, or a tinted surface - never as a bare
+- Accent `accent-400/500/600`: blue. Reserved for the active profile marker, primary
+  actions, and the `focus-visible` ring. Primary buttons use white text on `accent-500`.
+  Never a decorative fill.
+- Semantic `good` (in sync), `warn` (drift, pending apply, legacy `[senpi]`), `bad` (errors),
+  each with `300/500/700`: `500` for tinted surfaces, `700` for text on light, `300` for text
+  on dark. Semantic colors appear as a dot, a text color, or a tinted surface - never as a bare
   coloured edge.
 - Radius: `rounded-panel` for panels/dialogs/cards, `rounded-md` for controls, `rounded-full`
   for badges and dots.
@@ -43,7 +45,8 @@ utilities on every surface. Light = `ink-100` app background on `ink-50` panels;
 ## 3. Primitives (`src/components/primitives.tsx`)
 
 - `Button` - variants `primary` (accent), `secondary` (ink surface + border), `ghost`
-  (transparent, ink wash on hover), `danger` (bad-500 text, bad wash on hover); sizes `sm`/`md`.
+  (transparent, ink wash on hover), `danger` (bad-700 text, bad wash on hover); sizes
+  `sm`/`md`/`icon` (square, matches control height).
 - `IconButton` - square ghost button, always carries an accessible label.
 - `Field` - label + control + optional hint/error, wired with `htmlFor`/`id` and
   `aria-describedby`. Every input in the app goes through it.
@@ -57,23 +60,31 @@ utilities on every surface. Light = `ink-100` app background on `ink-50` panels;
 ## 4. State encoding (AI-slop guard)
 
 Selection and focus are expressed by ink washes, weight, and a glyph - never by a coloured side
-border. The selected profile row uses an ink wash plus an accent dot; the active profile adds an
-accent `Badge`. `focus-visible` rings are the only coloured edges in the app.
+border. The selected profile card gets an accent wash and a full accent ring (never a single
+side); the active profile adds an accent `Badge`. Apart from that ring and `focus-visible`
+rings, no edge in the app is coloured.
 
 ## 5. Component contract
 
 - `StatusBar` - config path (mono, truncating), active profile name, drift state, `[native]`
-  presence, legacy `[senpi]` warning, `omo` availability, language toggle. Drift renders a
-  `warn` badge plus `Re-apply` and `Capture` buttons.
-- `ProfileList` - left column; each row shows name, agent/category counts, updated timestamp,
-  and per-row `Apply` / `Duplicate` / `Delete`. Header carries `New profile`, `Import`, `Backups`.
-- `ProfileEditor` - right column; name and note fields, then `Agents` and `Categories` sections
-  of `AssignmentRow`, with add controls and a save button plus unsaved-changes marker.
-- `AssignmentRow` - key, model (via `ModelPicker`), reasoning `Select`, fallback models list,
-  and an extra-JSON `TextArea` that reports parse failures inline.
+  presence, legacy `[senpi]` warning, `omo` availability, language toggle. External drift
+  renders a `warn` badge plus `Re-apply` and `Capture` buttons; saving the active profile
+  without applying renders a `pending` badge plus an apply button instead.
+- `ProfileList` - left column; each card shows name, agent/category counts, updated timestamp,
+  and per-card apply / `Duplicate` / `Delete`. The apply button reads `Applied` (disabled) when
+  the active profile is in sync, `Re-apply` when it is not, `Apply` otherwise. Header carries
+  `New profile`, `Import`, `Backups`.
+- `ProfileEditor` - right column; an apply-state banner (`synced | pending | drifted |
+  inactive`, with an apply button unless synced), name and note fields, then `Agents` and
+  `Categories` sections with a shared column header over `AssignmentRow`s.
+- `AssignmentRow` - grid (`ASSIGNMENT_GRID`): key | model | reasoning | remove, with fallback
+  models under the model and a collapsed "other settings (JSON)" toggle under reasoning. The JSON
+  editor expands below and stays open while its content is invalid.
 - `ModelPicker` - hand-rolled combobox: filterable `list_models` listbox with
-  `aria-activedescendant`, arrow/Enter/Esc keys, free text always accepted, a refresh button, and
-  the `omoNotFound` hint when `omo` is unavailable.
+  `aria-activedescendant`, arrow/Enter/Esc keys, free text always accepted, an icon refresh
+  button, the format hint only while the list is open, and the `omoNotFound` hint when `omo` is
+  unavailable.
+- Notices - bottom-right toast (`aria-live="polite"`) that dismisses after 6 s.
 - `SwitchPreview` - dialog with before/after `[native]` text side by side in `font-mono`,
   changed/unchanged badge, confirm applies with the preview `baseHash` as `expectedHash`.
 - `ImportDialog` - source radio group (`opencode` | `native`), name field, renamed-keys notice.

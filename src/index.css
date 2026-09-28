@@ -1,32 +1,38 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Segoe UI Variable Text", "Segoe UI", "Yu Gothic UI", "Noto Sans JP", system-ui, sans-serif;
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", "BIZ UDPGothic", "Meiryo UI", "Noto Sans JP", system-ui, sans-serif;
   --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "BIZ UDGothic", monospace;
 
-  --color-ink-50: oklch(0.985 0.002 250);
-  --color-ink-100: oklch(0.96 0.003 250);
-  --color-ink-200: oklch(0.915 0.004 250);
-  --color-ink-300: oklch(0.85 0.005 250);
-  --color-ink-400: oklch(0.66 0.007 250);
-  --color-ink-500: oklch(0.54 0.008 250);
-  --color-ink-600: oklch(0.43 0.009 255);
-  --color-ink-700: oklch(0.32 0.011 260);
-  --color-ink-800: oklch(0.235 0.012 262);
-  --color-ink-900: oklch(0.175 0.012 264);
-  --color-ink-950: oklch(0.13 0.011 265);
+  --color-ink-50: oklch(0.99 0.002 250);
+  --color-ink-100: oklch(0.967 0.003 250);
+  --color-ink-200: oklch(0.92 0.005 250);
+  --color-ink-300: oklch(0.86 0.006 250);
+  --color-ink-400: oklch(0.62 0.009 255);
+  --color-ink-500: oklch(0.5 0.01 258);
+  --color-ink-600: oklch(0.41 0.011 260);
+  --color-ink-700: oklch(0.31 0.012 262);
+  --color-ink-800: oklch(0.25 0.012 264);
+  --color-ink-900: oklch(0.205 0.01 266);
+  --color-ink-950: oklch(0.165 0.009 266);
 
-  --color-accent-400: oklch(0.79 0.135 72);
-  --color-accent-500: oklch(0.72 0.152 65);
-  --color-accent-600: oklch(0.62 0.148 58);
+  --color-accent-400: oklch(0.7 0.15 252);
+  --color-accent-500: oklch(0.6 0.19 256);
+  --color-accent-600: oklch(0.52 0.19 258);
 
-  --color-good-500: oklch(0.68 0.13 160);
-  --color-warn-500: oklch(0.76 0.145 85);
-  --color-bad-500: oklch(0.61 0.18 25);
+  --color-good-300: oklch(0.8 0.12 158);
+  --color-good-500: oklch(0.6 0.14 158);
+  --color-good-700: oklch(0.45 0.11 158);
+  --color-warn-300: oklch(0.84 0.13 80);
+  --color-warn-500: oklch(0.66 0.15 70);
+  --color-warn-700: oklch(0.48 0.12 60);
+  --color-bad-300: oklch(0.78 0.12 25);
+  --color-bad-500: oklch(0.58 0.2 25);
+  --color-bad-700: oklch(0.47 0.17 25);
 
-  --radius-panel: 0.625rem;
-  --text-micro: 0.6875rem;
-  --text-micro--line-height: 1.45;
+  --radius-panel: 0.75rem;
+  --text-micro: 0.75rem;
+  --text-micro--line-height: 1.5;
   --ease-ui: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
@@ -44,6 +50,8 @@
   body {
     margin: 0;
     font-family: var(--font-sans);
+    font-size: 0.875rem;
+    line-height: 1.5;
     background-color: var(--color-ink-100);
     color: var(--color-ink-800);
     -webkit-font-smoothing: antialiased;

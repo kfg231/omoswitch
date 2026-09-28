@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { mergeAssignment, splitAssignment } from "../lib/assignment";
 import { findDeadProviders } from "../lib/deadReference";
@@ -14,6 +14,8 @@ import type { Assignment, ModelInfo, ProviderInfo } from "../lib/types";
 import { ImeSafeInput } from "./ImeSafeInput";
 import { ModelPicker } from "./ModelPicker";
 import { Badge, Button, Field, IconButton, Select, TextArea, TextInput } from "./primitives";
+
+export const ASSIGNMENT_GRID = "sm:grid-cols-[11rem_minmax(0,1fr)_9.5rem_2rem]";
 
 export interface AssignmentRowProps {
   entryKey: string;
@@ -55,10 +57,12 @@ export function AssignmentRow({
   const order = Object.keys(assignment);
   const [extraText, setExtraText] = useState(() => stringifyExtra(parts.extra));
   const [extraError, setExtraError] = useState(false);
+  const [extraOpen, setExtraOpen] = useState(false);
   const [fallbackDraft, setFallbackDraft] = useState("");
   const [fallbackRevision, setFallbackRevision] = useState(0);
   const fallbackRef = useRef<HTMLInputElement>(null);
   const refocusFallback = useRef(false);
+  const extraPanelId = useId();
 
   useEffect(() => {
     if (refocusFallback.current) {
@@ -101,11 +105,7 @@ export function AssignmentRow({
     update({ models: [...parts.models, value] });
   }
 
-  const deadProviders = findDeadProviders(
-    [parts.model, ...parts.models],
-    models,
-    providers,
-  );
+  const deadProviders = findDeadProviders([parts.model, ...parts.models], models, providers);
 
   const known =
     section === "agents" ? isNativeAgent(entryKey, knownKeys) : isNativeCategory(entryKey, knownKeys);
@@ -119,97 +119,74 @@ export function AssignmentRow({
           key: entryKey,
         });
 
+  const extraKeys = Object.keys(parts.extra).length;
+  // Invalid JSON must stay visible so the error is never hidden behind the toggle.
+  const showExtra = extraOpen || extraError;
+
   return (
-    <li className="rounded-panel bg-ink-100/70 p-3 ring-1 ring-ink-200 dark:bg-ink-950/50 dark:ring-ink-800">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-        <div className="sm:w-44">
-          <Field label={t("editor.key")} error={keyError} hint={unknownHint ?? undefined}>
+    <li className="rounded-lg bg-ink-100/60 p-3 ring-1 ring-ink-200 dark:bg-ink-950/50 dark:ring-ink-800">
+      <div className={`grid grid-cols-1 gap-x-3 gap-y-2 ${ASSIGNMENT_GRID}`}>
+        <div className="flex min-w-0 flex-col gap-1 sm:row-span-2">
+          <Field label={t("editor.key")} labelHidden error={keyError} hint={unknownHint ?? undefined}>
             {(field) => (
               <TextInput
                 {...field}
                 value={entryKey}
                 readOnly
-                className="font-mono text-xs"
+                className="bg-ink-100 font-mono font-medium dark:bg-ink-900"
               />
             )}
           </Field>
           {unknownHint !== null ? (
-            <div className="mt-1" title={unknownHint}>
+            <div title={unknownHint}>
               <Badge tone="warn">
                 {t(legacyTarget !== null ? "editor.legacyKeyBadge" : "editor.unknownKeyBadge")}
               </Badge>
             </div>
           ) : null}
         </div>
-        <div className="flex-1">
-          <Field label={t("editor.model")} error={modelError}>
-            {(field) => (
-              <ModelPicker
-                id={field.id}
-                describedBy={field["aria-describedby"]}
-                value={parts.model}
-                models={models}
-                providers={providers}
-                omoAvailable={omoAvailable}
-                onChange={(model) => update({ model })}
-                onRefresh={onRefreshModels}
-              />
-            )}
-          </Field>
-        </div>
-        <div className="sm:w-36">
-          <Field label={t("editor.reasoning")}>
-            {(field) => (
-              <Select
-                {...field}
-                value={parts.reasoning ?? ""}
-                onChange={(event) => {
-                  const raw = event.target.value;
-                  update({ reasoning: isReasoning(raw) ? raw : null });
-                }}
-              >
-                <option value="">{t("reasoning.unset")}</option>
-                {REASONING_LEVELS.map((level) => (
-                  <option key={level} value={level}>
-                    {t(`reasoning.${level}`)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </Field>
-        </div>
-        <IconButton label={t("editor.removeEntry")} onClick={onRemove} className="sm:mt-5">
+
+        <Field label={t("editor.model")} labelHidden error={modelError}>
+          {(field) => (
+            <ModelPicker
+              id={field.id}
+              describedBy={field["aria-describedby"]}
+              value={parts.model}
+              models={models}
+              providers={providers}
+              omoAvailable={omoAvailable}
+              onChange={(model) => update({ model })}
+              onRefresh={onRefreshModels}
+            />
+          )}
+        </Field>
+
+        <Field label={t("editor.reasoning")} labelHidden>
+          {(field) => (
+            <Select
+              {...field}
+              value={parts.reasoning ?? ""}
+              onChange={(event) => {
+                const raw = event.target.value;
+                update({ reasoning: isReasoning(raw) ? raw : null });
+              }}
+            >
+              <option value="">{t("reasoning.unset")}</option>
+              {REASONING_LEVELS.map((level) => (
+                <option key={level} value={level}>
+                  {t(`reasoning.${level}`)}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+
+        <IconButton label={t("editor.removeEntry")} onClick={onRemove} className="justify-self-end">
           <span aria-hidden="true">✕</span>
         </IconButton>
-      </div>
 
-      {deadProviders.map((providerId) => (
-        <div
-          key={providerId}
-          role="status"
-          data-testid={`dead-reference-${providerId}`}
-          className="mt-3 flex flex-wrap items-center gap-3 rounded-md bg-warn-500/12 px-3 py-2"
-        >
-          <p className="min-w-0 flex-1 text-xs text-ink-700 dark:text-ink-200">
-            <span aria-hidden="true" className="mr-1.5 font-semibold text-warn-500">
-              !
-            </span>
-            {t("provider.deadReference", { provider: providerId })}
-          </p>
-          <Button
-            size="sm"
-            variant="primary"
-            data-testid={`configure-provider-${providerId}`}
-            onClick={() => onConfigureProvider(providerId)}
-          >
-            {t("provider.configureProvider")}
-          </Button>
-        </div>
-      ))}
-
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <Field label={t("editor.fallbackModels")} labelHidden={false}>
+        <div className="flex min-w-0 flex-col gap-1.5 sm:col-start-2">
+          <Field label={t("editor.fallbackModels")}>
             {(field) => (
               <div className="flex items-center gap-1.5">
                 <ImeSafeInput
@@ -218,7 +195,7 @@ export function AssignmentRow({
                   ref={fallbackRef}
                   value={fallbackDraft}
                   placeholder={t("editor.fallbackPlaceholder")}
-                  className="font-mono text-xs"
+                  className="font-mono"
                   onCommit={setFallbackDraft}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.nativeEvent.isComposing) {
@@ -227,8 +204,13 @@ export function AssignmentRow({
                     }
                   }}
                 />
-                <Button size="sm" onClick={() => addFallback(fallbackDraft, false)}>
-                  {t("editor.addFallback")}
+                <Button
+                  aria-label={t("editor.addFallback")}
+                  title={t("editor.addFallback")}
+                  size="icon"
+                  onClick={() => addFallback(fallbackDraft, false)}
+                >
+                  <span aria-hidden="true">+</span>
                 </Button>
               </div>
             )}
@@ -238,12 +220,15 @@ export function AssignmentRow({
               {parts.models.map((model, index) => (
                 <li
                   key={`${model}-${index}`}
-                  className="inline-flex items-center gap-1 rounded-full bg-ink-200/70 py-0.5 pr-1 pl-2 font-mono text-micro text-ink-700 dark:bg-ink-800 dark:text-ink-200"
+                  className="inline-flex items-center gap-1 rounded-md bg-white py-0.5 pr-0.5 pl-2 font-mono text-xs text-ink-800 ring-1 ring-ink-300 dark:bg-ink-900 dark:text-ink-100 dark:ring-ink-700"
                 >
+                  <span className="mr-0.5 text-micro text-ink-500 tabular-nums dark:text-ink-400">
+                    {index + 1}
+                  </span>
                   {model}
                   <IconButton
                     label={t("editor.removeFallback", { model })}
-                    className="size-4 text-micro"
+                    className="size-5 text-micro"
                     onClick={() =>
                       update({ models: parts.models.filter((_, position) => position !== index) })
                     }
@@ -255,20 +240,80 @@ export function AssignmentRow({
             </ul>
           ) : null}
         </div>
-        <Field
-          label={t("editor.extra")}
-          error={extraError ? t("editor.extraInvalid") : undefined}
-        >
-          {(field) => (
-            <TextArea
-              {...field}
-              rows={3}
-              value={extraText}
-              placeholder={t("editor.extraPlaceholder")}
-              onChange={(event) => commitExtra(event.target.value)}
-            />
-          )}
-        </Field>
+
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="text-xs font-medium text-ink-600 dark:text-ink-300">
+            {t("editor.extraShort")}
+          </span>
+          <button
+            type="button"
+            aria-expanded={showExtra}
+            aria-controls={extraPanelId}
+            onClick={() => setExtraOpen((current) => !current)}
+            className="inline-flex h-8 items-center justify-between gap-1.5 rounded-md bg-white px-2.5 text-sm text-ink-700 ring-1 ring-ink-300 transition-colors duration-150 ease-ui hover:ring-ink-400 dark:bg-ink-950 dark:text-ink-200 dark:ring-ink-700 dark:hover:ring-ink-600"
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="font-mono text-xs">JSON</span>
+              {extraError ? (
+                <Badge tone="bad">{t("editor.extraErrorBadge")}</Badge>
+              ) : extraKeys > 0 ? (
+                <Badge tone="accent">{t("editor.extraCount", { count: extraKeys })}</Badge>
+              ) : (
+                <span className="text-micro text-ink-500 dark:text-ink-400">{t("editor.extraEmpty")}</span>
+              )}
+            </span>
+            <span
+              aria-hidden="true"
+              className={`text-micro text-ink-500 transition-transform duration-150 ease-ui ${showExtra ? "rotate-180" : ""}`}
+            >
+              ▾
+            </span>
+          </button>
+        </div>
+
+        {showExtra ? (
+          <div id={extraPanelId} className="sm:col-span-3 sm:col-start-2">
+            <Field
+              label={t("editor.extra")}
+              labelHidden
+              error={extraError ? t("editor.extraInvalid") : undefined}
+            >
+              {(field) => (
+                <TextArea
+                  {...field}
+                  rows={4}
+                  value={extraText}
+                  placeholder={t("editor.extraPlaceholder")}
+                  onChange={(event) => commitExtra(event.target.value)}
+                />
+              )}
+            </Field>
+          </div>
+        ) : null}
+
+        {deadProviders.map((providerId) => (
+          <div
+            key={providerId}
+            role="status"
+            data-testid={`dead-reference-${providerId}`}
+            className="flex flex-wrap items-center gap-3 rounded-md bg-warn-500/12 px-3 py-2 sm:col-span-3 sm:col-start-2"
+          >
+            <p className="min-w-0 flex-1 text-sm text-ink-800 dark:text-ink-100">
+              <span aria-hidden="true" className="mr-1.5 font-semibold text-warn-700 dark:text-warn-300">
+                !
+              </span>
+              {t("provider.deadReference", { provider: providerId })}
+            </p>
+            <Button
+              size="sm"
+              variant="primary"
+              data-testid={`configure-provider-${providerId}`}
+              onClick={() => onConfigureProvider(providerId)}
+            >
+              {t("provider.configureProvider")}
+            </Button>
+          </div>
+        ))}
       </div>
     </li>
   );
