@@ -2,7 +2,6 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { mergeAssignment, splitAssignment } from "../lib/assignment";
 import { findDeadProviders } from "../lib/deadReference";
-import { reasoningOptions } from "../lib/thinking";
 import {
   REASONING_LEVELS,
   isNativeAgent,
@@ -162,7 +161,7 @@ export function AssignmentRow({
               }}
             >
               <option value="">{t("reasoning.unset")}</option>
-              {reasoningOptions(parts.model, parts.reasoning, models, providers, REASONING_LEVELS).map((level) => (
+              {REASONING_LEVELS.map((level) => (
                 <option key={level} value={level}>
                   {t(`reasoning.${level}`)}
                 </option>
