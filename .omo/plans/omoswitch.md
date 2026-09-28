@@ -655,3 +655,22 @@ $cli="src-tauri\target\debug\omoswitch-cli.exe"
 5. Japanese typed into every model-id/name field commits correctly and retains focus.
 6. `pnpm tauri build` still produces `omoswitch.exe` + NSIS + MSI.
 7. 13 commits, one per task, clean tree, tagged `v0.2.0`.
+
+## Phase 2 scenario results (2026-09-28, HEAD after 05d7f4a, temp dir `%TEMP%\omoswitch-qa2`)
+
+| ID | Result | Evidence |
+|---|---|---|
+| P1 | PASS | `cargo test`: lib 98 + cli 2 passed, 0 failed, exit 0 (100 ≥ 85) |
+| P2 | PASS | `pnpm test`: 77 passed, exit 0 |
+| P3 | PASS | `pnpm build` exit 0 |
+| P4 | PASS | `pnpm e2e` (msedge): 23 passed, exit 0 |
+| P5 | PASS | exit 0; agentDir = `$qa\omo\agent`; providers = 0; models.json absent after list |
+| P6 | PASS | exit 0; models.json JSON-parses; ids gpt-6-astra, gpt-6-sol; `disabledProviders` absent |
+| P7 | PASS | exit 0; `git diff --no-index` adds only `deepseek` inside `providers`; hand comment and hand provider unchanged |
+| P8 | PASS | exit 0; hasKey true, keySource auth; test key in auth.json only; 0 hits in models.json and CLI stdout/stderr |
+| P9 | PASS | exit 0; enabled false; 2 models and baseUrl retained |
+| P10 | PASS | exit 0; agentDir = `$qa\alt-agent`; providers = 0 |
+| S11-equivalent | PASS | `pnpm tauri build` exit 0: omoswitch.exe 10.4MB, NSIS 2.9MB, MSI 5.1MB |
+| P-final | PENDING | needs explicit user OK (writes the real key under `~\.omo\agent`) |
+
+Real `~\.omo\omo.jsonc` sha256 was identical before and after P5–P10.
