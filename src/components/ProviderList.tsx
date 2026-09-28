@@ -42,7 +42,7 @@ export function ProviderList({
       {providers.length === 0 ? (
         <p className="px-3 py-6 text-xs text-ink-500 dark:text-ink-400">{t("provider.empty")}</p>
       ) : (
-        <ul className="min-h-0 flex-1 overflow-y-auto p-2">
+        <ul className="relative min-h-0 flex-1 overflow-y-auto p-2">
           {providers.map((provider) => {
             const probe = probes[provider.id];
             return (

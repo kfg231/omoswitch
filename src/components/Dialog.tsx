@@ -90,7 +90,7 @@ export function Dialog({ title, onClose, footer, wide = false, children }: Dialo
             <span aria-hidden="true">✕</span>
           </IconButton>
         </header>
-        <div className="flex-1 overflow-y-auto px-4 py-4">{children}</div>
+        <div className="relative flex-1 overflow-y-auto px-4 py-4">{children}</div>
         {footer !== undefined ? (
           <footer className="flex items-center justify-end gap-2 border-t border-ink-200 px-4 py-3 dark:border-ink-800">
             {footer}

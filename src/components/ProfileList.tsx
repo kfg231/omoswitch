@@ -55,7 +55,7 @@ export function ProfileList({
       {profiles.length === 0 ? (
         <p className="px-4 py-6 text-sm text-ink-600 dark:text-ink-300">{t("profileList.empty")}</p>
       ) : (
-        <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
+        <ul className="relative flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
           {profiles.map((profile) => {
             const selected = profile.id === selectedId;
             const active = profile.id === activeProfileId;

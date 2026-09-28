@@ -302,7 +302,7 @@ export function ProfileEditor({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label={t("editor.name")} error={errors["name"] === undefined ? undefined : t(errors["name"])}>
             {(field) => (
