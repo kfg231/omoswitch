@@ -1,14 +1,19 @@
-use omoswitch_lib::commands::{json_value, profile_by_name_or_id};
+use omoswitch_lib::commands::{
+    error_value, json_value, profile_by_name_or_id, provider_key_for_request,
+};
 use omoswitch_lib::error::AppError;
 use omoswitch_lib::models;
 use omoswitch_lib::omo_config;
 use omoswitch_lib::paths::Paths;
+use omoswitch_lib::providers::{self, ProviderInfo, ProviderInput, ProviderModel, ProvidersResult};
 use omoswitch_lib::store::{ImportSource, ProfileInput, Store};
 use std::env;
+use std::io::Read;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn usage() -> &'static str {
-    "usage: omoswitch-cli <status|list|import|preview|apply|models|backups>"
+    "usage: omoswitch-cli <status|list|import|preview|apply|models|backups|providers|provider-add|provider-enable|provider-disable|provider-key|provider-test|provider-models|providers-import>"
 }
 
 fn arg_value(args: &[String], name: &str) -> Result<String, AppError> {
@@ -19,6 +24,83 @@ fn arg_value(args: &[String], name: &str) -> Result<String, AppError> {
             message: format!("missing {name}"),
             field: name.to_owned(),
         })
+}
+
+fn provider_id(args: &[String]) -> Result<&str, AppError> {
+    args.get(2)
+        .map(String::as_str)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| AppError::InvalidProvider {
+            message: "missing provider id".to_owned(),
+            field: "id".to_owned(),
+        })
+}
+
+fn provider_models(args: &[String]) -> Result<Vec<ProviderModel>, AppError> {
+    let mut models = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] == "--model" {
+            let model_id = args
+                .get(index + 1)
+                .filter(|value| !value.starts_with('-'))
+                .ok_or_else(|| AppError::InvalidProvider {
+                    message: "missing model id".to_owned(),
+                    field: "model".to_owned(),
+                })?;
+            models.push(ProviderModel {
+                id: model_id.clone(),
+                name: None,
+                reasoning: None,
+                context_window: None,
+                max_tokens: None,
+            });
+            index += 2;
+        } else {
+            index += 1;
+        }
+    }
+    Ok(models)
+}
+
+fn list_providers(paths: &Paths) -> Result<ProvidersResult, AppError> {
+    providers::list(
+        paths,
+        &models::list_models(paths, false).unwrap_or_default(),
+    )
+}
+
+fn provider_info(paths: &Paths, id: &str) -> Result<ProviderInfo, AppError> {
+    list_providers(paths)?
+        .providers
+        .into_iter()
+        .find(|provider| provider.id == id)
+        .ok_or_else(|| AppError::ProviderNotFound {
+            message: id.to_owned(),
+        })
+}
+
+fn opencode_config_path() -> PathBuf {
+    let user_profile = env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let directory = user_profile.join(".config").join("opencode");
+    let json = directory.join("opencode.json");
+    if json.exists() {
+        json
+    } else {
+        directory.join("opencode.jsonc")
+    }
+}
+
+fn read_stdin_key() -> Result<String, AppError> {
+    let mut key = String::new();
+    std::io::stdin()
+        .read_to_string(&mut key)
+        .map_err(|error| AppError::Io {
+            message: error.to_string(),
+        })?;
+    Ok(key.trim_end().to_owned())
 }
 
 fn run(args: &[String]) -> Result<String, AppError> {
@@ -76,6 +158,70 @@ fn run(args: &[String]) -> Result<String, AppError> {
             args.iter().any(|arg| arg == "--refresh"),
         )?),
         "backups" => json_value(&omo_config::list_backups(&paths)?),
+        "providers" => json_value(&list_providers(&paths)?),
+        "provider-add" => {
+            let id = arg_value(args, "--id")?;
+            let name = args
+                .windows(2)
+                .find(|pair| pair[0] == "--name")
+                .map(|pair| pair[1].clone())
+                .unwrap_or_else(|| id.clone());
+            let input = ProviderInput {
+                id: id.clone(),
+                name,
+                base_url: arg_value(args, "--base-url")?,
+                api: arg_value(args, "--api")?,
+                models: provider_models(args)?,
+                inline_key: false,
+            };
+            providers::save(&paths, input)?;
+            json_value(&provider_info(&paths, &id)?)
+        }
+        "provider-enable" => {
+            let id = provider_id(args)?;
+            providers::set_enabled(&paths, id, true)?;
+            json_value(&provider_info(&paths, id)?)
+        }
+        "provider-disable" => {
+            let id = provider_id(args)?;
+            providers::set_enabled(&paths, id, false)?;
+            json_value(&provider_info(&paths, id)?)
+        }
+        "provider-key" => {
+            let id = provider_id(args)?;
+            if !args.iter().any(|arg| arg == "--stdin") {
+                return Err(AppError::InvalidProvider {
+                    message: "key input must use stdin".to_owned(),
+                    field: "stdin".to_owned(),
+                });
+            }
+            provider_info(&paths, id)?;
+            let key = read_stdin_key()?;
+            omoswitch_lib::auth::set_key(&paths.auth_json_path(), id, &key)?;
+            json_value(&serde_json::json!({"ok": true, "id": id}))
+        }
+        "provider-test" => {
+            let id = provider_id(args)?;
+            let provider = provider_info(&paths, id)?;
+            let key = provider_key_for_request(&paths, id)?;
+            json_value(&omoswitch_lib::net::probe(
+                &provider.base_url,
+                key.as_deref(),
+            ))
+        }
+        "provider-models" => {
+            let id = provider_id(args)?;
+            let provider = provider_info(&paths, id)?;
+            let key = provider_key_for_request(&paths, id)?;
+            json_value(&omoswitch_lib::net::fetch_models(
+                &provider.base_url,
+                key.as_deref(),
+            )?)
+        }
+        "providers-import" => json_value(&providers::import_from_opencode(
+            &paths,
+            &opencode_config_path(),
+        )?),
         _ => Err(AppError::Io {
             message: usage().to_owned(),
         }),
@@ -98,10 +244,9 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!(
-                "{}",
-                serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
-            );
+            let output = error_value(&error)
+                .unwrap_or_else(|serialization_error| serialization_error.to_string());
+            eprintln!("{output}");
             ExitCode::FAILURE
         }
     }
@@ -109,6 +254,8 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn parses_refresh_flag() {
         let args = vec![
@@ -117,5 +264,25 @@ mod tests {
             "--refresh".to_owned(),
         ];
         assert!(args.iter().any(|arg| arg == "--refresh"));
+    }
+
+    #[test]
+    fn parses_repeated_provider_models() {
+        let args = vec![
+            "cli".to_owned(),
+            "provider-add".to_owned(),
+            "--model".to_owned(),
+            "first".to_owned(),
+            "--model".to_owned(),
+            "second".to_owned(),
+        ];
+        let models = provider_models(&args).expect("repeated models parse");
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
     }
 }

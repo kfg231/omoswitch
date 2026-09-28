@@ -42,7 +42,16 @@ pub fn run() {
             commands::apply_profile,
             commands::list_models,
             commands::list_backups,
-            commands::restore_backup
+            commands::restore_backup,
+            commands::list_providers,
+            commands::save_provider,
+            commands::delete_provider,
+            commands::set_provider_enabled,
+            commands::set_provider_key,
+            commands::clear_provider_key,
+            commands::test_provider,
+            commands::fetch_provider_models,
+            commands::import_providers_from_opencode
         ])
         .setup(|app| {
             tray::setup(app)?;

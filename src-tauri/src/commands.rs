@@ -2,8 +2,10 @@ use crate::error::AppError;
 use crate::models::ModelInfo;
 use crate::omo_config::{self, ApplyResult, BackupInfo, Status, SwitchPreview};
 use crate::paths::Paths;
+use crate::providers::{self, ProviderImportResult, ProviderInfo, ProviderInput, ProvidersResult};
 use crate::store::{ImportResult, ImportSource, Profile, ProfileInput, Store};
 use serde_json::Value;
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use tauri::{AppHandle, Emitter, State};
 
@@ -133,6 +135,125 @@ pub fn restore_backup(
             message: error.to_string(),
         })?;
     Ok(result)
+}
+
+fn provider_models(paths: &Paths) -> Vec<ModelInfo> {
+    crate::models::list_models(paths, false).unwrap_or_default()
+}
+
+fn provider_list(paths: &Paths) -> Result<ProvidersResult, AppError> {
+    providers::list(paths, &provider_models(paths))
+}
+
+fn provider_by_id(paths: &Paths, id: &str) -> Result<ProviderInfo, AppError> {
+    provider_list(paths)?
+        .providers
+        .into_iter()
+        .find(|provider| provider.id == id)
+        .ok_or_else(|| AppError::ProviderNotFound {
+            message: id.to_owned(),
+        })
+}
+
+pub fn provider_key_for_request(paths: &Paths, id: &str) -> Result<Option<String>, AppError> {
+    crate::auth::read_key_for_request(&paths.auth_json_path(), id)
+}
+
+fn opencode_config_path() -> PathBuf {
+    let user_profile = std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let directory = user_profile.join(".config").join("opencode");
+    let json = directory.join("opencode.json");
+    if json.exists() {
+        json
+    } else {
+        directory.join("opencode.jsonc")
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn list_providers(state: State<'_, AppState>) -> Result<ProvidersResult, AppError> {
+    provider_list(&state.paths)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn save_provider(
+    state: State<'_, AppState>,
+    input: ProviderInput,
+) -> Result<ProviderInfo, AppError> {
+    let id = input.id.clone();
+    providers::save(&state.paths, input)?;
+    provider_by_id(&state.paths, &id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn delete_provider(state: State<'_, AppState>, id: String) -> Result<(), AppError> {
+    providers::delete(&state.paths, &id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_provider_enabled(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<ProviderInfo, AppError> {
+    providers::set_enabled(&state.paths, &id, enabled)?;
+    provider_by_id(&state.paths, &id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_provider_key(
+    state: State<'_, AppState>,
+    id: String,
+    key: String,
+) -> Result<ProviderInfo, AppError> {
+    provider_by_id(&state.paths, &id)?;
+    if key.trim().is_empty() {
+        return Err(AppError::InvalidProvider {
+            message: "key must not be empty".to_owned(),
+            field: "key".to_owned(),
+        });
+    }
+    crate::auth::set_key(&state.paths.auth_json_path(), &id, &key)?;
+    provider_by_id(&state.paths, &id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn clear_provider_key(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ProviderInfo, AppError> {
+    provider_by_id(&state.paths, &id)?;
+    crate::auth::clear_key(&state.paths.auth_json_path(), &id)?;
+    provider_by_id(&state.paths, &id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn test_provider(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<crate::net::ProbeResult, AppError> {
+    let provider = provider_by_id(&state.paths, &id)?;
+    let key = crate::auth::read_key_for_request(&state.paths.auth_json_path(), &id)?;
+    Ok(crate::net::probe(&provider.base_url, key.as_deref()))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn fetch_provider_models(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<crate::net::FetchedModels, AppError> {
+    let provider = provider_by_id(&state.paths, &id)?;
+    let key = crate::auth::read_key_for_request(&state.paths.auth_json_path(), &id)?;
+    crate::net::fetch_models(&provider.base_url, key.as_deref())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn import_providers_from_opencode(
+    state: State<'_, AppState>,
+) -> Result<ProviderImportResult, AppError> {
+    providers::import_from_opencode(&state.paths, &opencode_config_path())
 }
 
 pub fn import_value(

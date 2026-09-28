@@ -72,7 +72,9 @@ pub fn rebuild(app: &AppHandle) -> tauri::Result<()> {
         )
     })?;
     let active = store.active_profile_id();
-    let drift = omo_config::status(&state.paths, &store).drift;
+    let status = omo_config::status(&state.paths, &store);
+    let drift = status.drift;
+    let provider_count = status.provider_count;
     let (open_label, quit_label, profile_label) = labels();
     let open = MenuItem::with_id(app, "open", open_label, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
@@ -93,9 +95,10 @@ pub fn rebuild(app: &AppHandle) -> tauri::Result<()> {
         items.iter().map(|item| item.as_ref()).collect();
     tray.set_menu(Some(Menu::with_items(app, &refs)?))?;
     tray.set_tooltip(Some(format!(
-        "OmOswitch — {} [{}]",
+        "OmOswitch — {} [{}; providers:{}]",
         active.unwrap_or("none"),
-        format_drift(drift)
+        format_drift(drift),
+        provider_count
     )))?;
     Ok(())
 }

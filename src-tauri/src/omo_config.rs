@@ -37,6 +37,9 @@ pub struct Status {
     pub legacy_senpi_present: bool,
     pub omo_available: bool,
     pub config_hash: Option<String>,
+    pub agent_dir: String,
+    pub models_json_present: bool,
+    pub provider_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +73,7 @@ fn io(error: std::io::Error) -> AppError {
         message: error.to_string(),
     }
 }
+
 fn config_missing(path: &Path) -> AppError {
     AppError::ConfigMissing {
         message: path.display().to_string(),
@@ -105,6 +109,18 @@ pub fn load(paths: &Paths) -> Result<Loaded, AppError> {
 
 pub fn status(paths: &Paths, store: &Store) -> Status {
     let path = paths.config_path();
+    let agent_dir = paths.agent_dir().display().to_string();
+    let models_json_path = paths.models_json_path();
+    let models_json_present = models_json_path.exists();
+    let provider_count = fs::read_to_string(&models_json_path)
+        .ok()
+        .and_then(|text| {
+            jsonc_edit::get_object_path(&text, &["providers"])
+                .ok()
+                .flatten()
+        })
+        .and_then(|value| value.as_object().map(Map::len))
+        .unwrap_or(0);
     let active = store.active_profile_id().map(str::to_owned);
     let available = omo_available(&paths.omo_bin);
     let missing = !path.exists();
@@ -118,6 +134,9 @@ pub fn status(paths: &Paths, store: &Store) -> Status {
             legacy_senpi_present: false,
             omo_available: available,
             config_hash: None,
+            agent_dir: agent_dir.clone(),
+            models_json_present,
+            provider_count,
         };
     }
     let bytes = match fs::read(&path) {
@@ -132,6 +151,9 @@ pub fn status(paths: &Paths, store: &Store) -> Status {
                 legacy_senpi_present: false,
                 omo_available: available,
                 config_hash: None,
+                agent_dir: agent_dir.clone(),
+                models_json_present,
+                provider_count,
             }
         }
     };
@@ -148,6 +170,9 @@ pub fn status(paths: &Paths, store: &Store) -> Status {
                 legacy_senpi_present: false,
                 omo_available: available,
                 config_hash,
+                agent_dir: agent_dir.clone(),
+                models_json_present,
+                provider_count,
             }
         }
     };
@@ -194,6 +219,9 @@ pub fn status(paths: &Paths, store: &Store) -> Status {
         legacy_senpi_present: senpi,
         omo_available: available,
         config_hash: Some(loaded.hash),
+        agent_dir,
+        models_json_present,
+        provider_count,
     }
 }
 
