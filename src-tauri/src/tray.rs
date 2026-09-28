@@ -21,7 +21,11 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", open_label, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
-    TrayIconBuilder::with_id("main-tray")
+    let mut builder = TrayIconBuilder::with_id("main-tray");
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
