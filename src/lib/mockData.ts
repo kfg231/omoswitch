@@ -95,7 +95,7 @@ export function seedProviders(): ProviderInfo[] {
           contextWindow: 128000,
           maxTokens: 32768,
           input: ["text", "image"],
-          thinking: { mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" },
+          thinkingLevelMap: { off: null, minimal: null },
           cost: { input: 0.27, output: 1.1 },
           headers: { Authorization: "Bearer MOCK-MODEL-HEADER-SECRET" },
         },

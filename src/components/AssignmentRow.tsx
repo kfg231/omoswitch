@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { mergeAssignment, splitAssignment } from "../lib/assignment";
 import { findDeadProviders } from "../lib/deadReference";
+import { reasoningOptions } from "../lib/thinking";
 import {
   REASONING_LEVELS,
   isNativeAgent,
@@ -62,11 +63,7 @@ export function AssignmentRow({
   const extraPanelId = useId();
 
   function update(next: Partial<typeof parts>): void {
-    const merged = mergeAssignment({ ...parts, ...next }, order);
-    onChange(merged);
-    // Sync extraText to reflect the current merged assignment's extra fields
-    const updatedParts = splitAssignment(merged);
-    setExtraText(stringifyExtra(updatedParts.extra));
+    onChange(mergeAssignment({ ...parts, ...next }, order));
   }
 
   function commitExtra(raw: string): void {
@@ -155,28 +152,23 @@ export function AssignmentRow({
         </Field>
 
         <Field label={t("editor.reasoning")} labelHidden>
-          {(field) => {
-            const selectedModel = models.find((m) => m.id === parts.model);
-            const supportsReasoning = selectedModel?.thinking ?? true;
-            return (
-              <Select
-                {...field}
-                value={parts.reasoning ?? ""}
-                disabled={!supportsReasoning}
-                onChange={(event) => {
-                  const raw = event.target.value;
-                  update({ reasoning: isReasoning(raw) ? raw : null });
-                }}
-              >
-                <option value="">{t("reasoning.unset")}</option>
-                {REASONING_LEVELS.map((level) => (
-                  <option key={level} value={level}>
-                    {t(`reasoning.${level}`)}
-                  </option>
-                ))}
-              </Select>
-            );
-          }}
+          {(field) => (
+            <Select
+              {...field}
+              value={parts.reasoning ?? ""}
+              onChange={(event) => {
+                const raw = event.target.value;
+                update({ reasoning: isReasoning(raw) ? raw : null });
+              }}
+            >
+              <option value="">{t("reasoning.unset")}</option>
+              {reasoningOptions(parts.model, parts.reasoning, models, providers, REASONING_LEVELS).map((level) => (
+                <option key={level} value={level}>
+                  {t(`reasoning.${level}`)}
+                </option>
+              ))}
+            </Select>
+          )}
         </Field>
 
         <IconButton label={t("editor.removeEntry")} onClick={onRemove} className="justify-self-end">

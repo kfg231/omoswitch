@@ -28,7 +28,7 @@ pub struct ProviderModel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<Value>,
+    pub thinking_level_map: Option<Map<String, Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -113,6 +113,49 @@ fn invalid(field: &str, message: &str) -> AppError {
 
 const REDACTED: &str = "<redacted>";
 const EFFORTS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+const THINKING_LEVELS: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+// senpi (pi-ai getSupportedThinkingLevels): once a thinkingLevelMap exists, levels up to `high`
+// stay available unless mapped to null, while `xhigh`/`max` need a non-null entry.
+fn level_map_from_efforts(efforts: &[&str]) -> Option<Map<String, Value>> {
+    if efforts.is_empty() {
+        return None;
+    }
+    let mut map = Map::new();
+    for level in ["minimal", "low", "medium", "high"] {
+        if !efforts.contains(&level) {
+            map.insert(level.to_owned(), Value::Null);
+        }
+    }
+    for level in ["xhigh", "max"] {
+        if efforts.contains(&level) {
+            map.insert(level.to_owned(), Value::String(level.to_owned()));
+        }
+    }
+    Some(map)
+}
+
+// Earlier OmOswitch builds wrote a `thinking: { mode, efforts }` object that senpi never reads.
+fn migrate_legacy_thinking(value: &Value) -> Value {
+    let mut value = value.clone();
+    let Some(object) = value.as_object_mut() else {
+        return value;
+    };
+    let Some(legacy) = object.remove("thinking") else {
+        return value;
+    };
+    if !object.contains_key("thinkingLevelMap") {
+        let efforts = legacy
+            .get("efforts")
+            .and_then(Value::as_array)
+            .map(|efforts| efforts.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+            .unwrap_or_default();
+        if let Some(map) = level_map_from_efforts(&efforts) {
+            object.insert(String::from("thinkingLevelMap"), Value::Object(map));
+        }
+    }
+    value
+}
 
 fn sensitive_header_name(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
@@ -367,8 +410,8 @@ fn model_value(model: &ProviderModel) -> Value {
             Value::Array(input.iter().cloned().map(Value::String).collect()),
         );
     }
-    if let Some(thinking) = &model.thinking {
-        value.insert(String::from("thinking"), thinking.clone());
+    if let Some(map) = &model.thinking_level_map {
+        value.insert(String::from("thinkingLevelMap"), Value::Object(map.clone()));
     }
     if let Some(context_window) = model.context_window {
         value.insert(String::from("contextWindow"), Value::from(context_window));
@@ -438,7 +481,9 @@ fn models_field(object: &Map<String, Value>) -> Vec<ProviderModel> {
         .map(|models| {
             models
                 .iter()
-                .filter_map(|value| serde_json::from_value(redacted_model_value(value)).ok())
+                .filter_map(|value| {
+                    serde_json::from_value(migrate_legacy_thinking(&redacted_model_value(value))).ok()
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -738,7 +783,7 @@ fn imported_input_values(value: &Map<String, Value>) -> Option<Vec<String>> {
     (!values.is_empty()).then_some(values)
 }
 
-fn imported_thinking(value: &Map<String, Value>) -> Option<Value> {
+fn imported_level_map(value: &Map<String, Value>) -> Option<Map<String, Value>> {
     let variants = value.get("variants")?.as_object()?;
     let mut efforts = variants
         .iter()
@@ -760,13 +805,7 @@ fn imported_thinking(value: &Map<String, Value>) -> Option<Value> {
             .unwrap_or(usize::MAX)
     });
     efforts.dedup();
-    if efforts.is_empty() {
-        return None;
-    }
-    Some(serde_json::json!({
-        "mode": "effort",
-        "efforts": efforts,
-    }))
+    level_map_from_efforts(&efforts)
 }
 
 fn import_model(value: &Value, id: &str) -> ProviderModel {
@@ -774,16 +813,16 @@ fn import_model(value: &Value, id: &str) -> ProviderModel {
     let reasoning = object
         .and_then(|object| object.get("reasoning"))
         .and_then(Value::as_bool);
-    let thinking = object.and_then(imported_thinking);
+    let thinking_level_map = object.and_then(imported_level_map);
     ProviderModel {
         id: id.to_owned(),
         name: object
             .and_then(|object| object.get("name"))
             .and_then(Value::as_str)
             .map(str::to_owned),
-        reasoning: reasoning.or_else(|| thinking.as_ref().map(|_| true)),
+        reasoning: reasoning.or_else(|| thinking_level_map.as_ref().map(|_| true)),
         input: object.and_then(imported_input_values),
-        thinking,
+        thinking_level_map,
         context_window: object.and_then(|object| {
             positive_u64(object.get("limit").and_then(|limit| limit.get("context")))
         }),
@@ -858,7 +897,7 @@ fn fill_model_details(existing: &mut Value, imported: &ProviderModel) -> bool {
         "maxTokens",
         "reasoning",
         "input",
-        "thinking",
+        "thinkingLevelMap",
     ] {
         if existing.get(key).is_none_or(Value::is_null) {
             if let Some(value) = imported.get(key) {
@@ -1038,17 +1077,22 @@ fn validate_provider_json(value: &Value) -> Result<(), AppError> {
                 return Err(invalid("input", "input must contain only text or image"));
             }
         }
-        if let Some(thinking) = model.get("thinking") {
-            let Some(thinking) = thinking.as_object() else {
+        if model.contains_key("thinking") {
+            return Err(invalid(
+                "thinking",
+                "senpi does not read \"thinking\"; use thinkingLevelMap",
+            ));
+        }
+        if let Some(map) = model.get("thinkingLevelMap") {
+            let valid = map.as_object().is_some_and(|map| {
+                map.iter().all(|(level, value)| {
+                    THINKING_LEVELS.contains(&level.as_str()) && (value.is_null() || value.is_string())
+                })
+            });
+            if !valid {
                 return Err(invalid(
-                    "thinking",
-                    "thinking must be an object with a string mode",
-                ));
-            };
-            if thinking.get("mode").and_then(Value::as_str).is_none() {
-                return Err(invalid(
-                    "thinking",
-                    "thinking must be an object with a string mode",
+                    "thinkingLevelMap",
+                    "thinkingLevelMap keys must be off, minimal, low, medium, high, xhigh or max with a string or null value",
                 ));
             }
         }
@@ -1153,7 +1197,7 @@ mod tests {
                     name: Some("Model A".to_owned()),
                     reasoning: Some(false),
                     input: None,
-                    thinking: None,
+                    thinking_level_map: None,
                     context_window: Some(4096),
                     max_tokens: Some(1024),
                     extra: Map::new(),
@@ -1163,7 +1207,7 @@ mod tests {
                     name: None,
                     reasoning: None,
                     input: None,
-                    thinking: None,
+                    thinking_level_map: None,
                     context_window: None,
                     max_tokens: None,
                     extra: Map::new(),
@@ -1458,10 +1502,9 @@ mod tests {
                     name: Some("Model A".to_owned()),
                     reasoning: Some(true),
                     input: Some(vec!["text".to_owned(), "image".to_owned()]),
-                    thinking: Some(serde_json::json!({
-                        "mode": "effort",
-                        "efforts": ["low", "high"]
-                    })),
+                    thinking_level_map: serde_json::json!({"minimal": null, "max": "max"})
+                        .as_object()
+                        .cloned(),
                     context_window: Some(1000),
                     max_tokens: Some(200),
                     extra,
@@ -1475,8 +1518,8 @@ mod tests {
         let expected_input = vec!["text".to_owned(), "image".to_owned()];
         assert_eq!(model.input.as_ref(), Some(&expected_input));
         assert_eq!(
-            model.thinking.as_ref().and_then(|value| value.get("mode")),
-            Some(&Value::String("effort".to_owned()))
+            model.thinking_level_map.clone().map(Value::Object),
+            Some(serde_json::json!({"minimal": null, "max": "max"}))
         );
         assert_eq!(
             model.extra.get("cost"),
@@ -1518,12 +1561,35 @@ mod tests {
         assert_eq!(model.input.as_ref(), Some(&expected_input));
         assert_eq!(model.reasoning, Some(true));
         assert_eq!(
-            model
-                .thinking
-                .as_ref()
-                .and_then(|value| value.get("efforts")),
-            Some(&serde_json::json!(["low", "high"]))
+            model.thinking_level_map.clone().map(Value::Object),
+            Some(serde_json::json!({"minimal": null, "medium": null}))
         );
+    }
+
+    #[test]
+    fn legacy_thinking_object_is_read_as_thinking_level_map() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let agent_dir = agent(root.path());
+        write_models(
+            &agent_dir,
+            r#"{"providers":{"alpha":{"baseUrl":"https://alpha.test","api":"openai-completions","models":[{"id":"a","reasoning":true,"thinking":{"mode":"effort","efforts":["medium"],"defaultLevel":"medium"}}]}}}"#,
+        );
+        let result = list_at(&agent_dir, &agent_dir.join("auth.json"), &[]).expect("list succeeds");
+        let model = &result.providers[0].models[0];
+        assert_eq!(
+            model.thinking_level_map.clone().map(Value::Object),
+            Some(serde_json::json!({"minimal": null, "low": null, "high": null}))
+        );
+        assert!(!model.extra.contains_key("thinking"));
+    }
+
+    #[test]
+    fn level_map_from_efforts_opts_in_extended_levels() {
+        assert_eq!(
+            level_map_from_efforts(&["low", "medium", "high", "xhigh", "max"]).map(Value::Object),
+            Some(serde_json::json!({"minimal": null, "xhigh": "xhigh", "max": "max"}))
+        );
+        assert_eq!(level_map_from_efforts(&[]), None);
     }
 
     #[test]

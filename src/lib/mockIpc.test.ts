@@ -283,7 +283,8 @@ describe("mock IPC backend", () => {
     const coder = parsed.models.find((model) => model["id"] === "deepseek-coder")!;
     expect(coder["headers"]).toEqual({ Authorization: "<redacted>" });
     expect(coder["cost"]).toEqual({ input: 0.27, output: 1.1 });
-    expect(coder["thinking"]).toEqual({ mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" });
+    expect(coder["thinkingLevelMap"]).toEqual({ off: null, minimal: null });
+    expect(coder["thinking"]).toBeUndefined();
     const listed = (await api.listProviders()).providers.find((p) => p.id === "deepseek")!;
     expect(JSON.stringify(listed)).not.toContain("MOCK-MODEL-HEADER-SECRET");
   });

@@ -171,34 +171,26 @@ describe("ProviderModelsTable model details", () => {
     expect(lastModels(onChange)).toEqual([{ id: "m", contextWindow: 64000, maxTokens: 32000 }]);
   });
 
-  it("maps effort checkboxes to an ordered thinking.efforts and removes it when none are left", () => {
-    const onChange = vi.fn();
-    render(<ProviderModelsTable models={[{ id: "m" }]} onChange={onChange} />);
-
-    fireEvent.click(screen.getByTestId("model-effort-high"));
-    fireEvent.click(screen.getByTestId("model-effort-low"));
-    expect(lastModels(onChange)).toEqual([{ id: "m", thinking: { mode: "effort", efforts: ["low", "high"] } }]);
-
-    fireEvent.change(screen.getByTestId("model-default-effort"), { target: { value: "high" } });
-    expect(lastModels(onChange)[0]!.thinking).toEqual({ mode: "effort", efforts: ["low", "high"], defaultLevel: "high" });
-
-    fireEvent.click(screen.getByTestId("model-effort-high"));
-    expect(lastModels(onChange)[0]!.thinking).toEqual({ mode: "effort", efforts: ["low"] });
-
-    fireEvent.click(screen.getByTestId("model-effort-low"));
-    expect(lastModels(onChange)).toEqual([{ id: "m" }]);
+  it("disables level chips until reasoning is on", () => {
+    render(<ProviderModelsTable models={[{ id: "m" }]} onChange={vi.fn()} />);
+    expect((screen.getByTestId("model-effort-low") as HTMLInputElement).disabled).toBe(true);
   });
 
-  it("keeps a non-effort thinking object and shows its mode read-only", () => {
+  it("writes thinkingLevelMap: null hides standard levels, strings enable xhigh/max, reset removes the map", () => {
     const onChange = vi.fn();
-    const thinking = { mode: "budget" as const, budgetTokens: 4096 };
-    render(<ProviderModelsTable models={[{ id: "m", thinking }]} onChange={onChange} />);
+    render(<ProviderModelsTable models={[{ id: "m", reasoning: true }]} onChange={onChange} />);
 
-    expect(screen.getByTestId("model-thinking-mode")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("model-effort-medium"));
-    expect(lastModels(onChange)[0]!.thinking).toEqual({ mode: "budget", budgetTokens: 4096, efforts: ["medium"] });
-    fireEvent.click(screen.getByTestId("model-effort-medium"));
-    expect(lastModels(onChange)[0]!.thinking).toEqual({ mode: "budget", budgetTokens: 4096 });
+    fireEvent.click(screen.getByTestId("model-effort-minimal"));
+    expect(lastModels(onChange)).toEqual([{ id: "m", reasoning: true, thinkingLevelMap: { minimal: null } }]);
+
+    fireEvent.click(screen.getByTestId("model-effort-max"));
+    expect(lastModels(onChange)[0]!.thinkingLevelMap).toEqual({ minimal: null, max: "max" });
+
+    fireEvent.click(screen.getByTestId("model-effort-minimal"));
+    expect(lastModels(onChange)[0]!.thinkingLevelMap).toEqual({ max: "max" });
+
+    fireEvent.click(screen.getByTestId("model-levels-reset"));
+    expect(lastModels(onChange)).toEqual([{ id: "m", reasoning: true }]);
   });
 
   it("toggles input modalities in order and omits input when empty", () => {

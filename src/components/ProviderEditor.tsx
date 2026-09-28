@@ -67,6 +67,13 @@ function draftOf(initial: ProviderInfo | null, prefillId?: string): Draft {
   };
 }
 
+export function previewJson(saved: string, draft: Draft): string {
+  const parsed: unknown = JSON.parse(saved);
+  const base = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+  const next = { ...base, name: draft.name, baseUrl: draft.baseUrl, api: draft.api, models: draft.models };
+  return JSON.stringify(next, null, 2);
+}
+
 export function ProviderEditor({
   open,
   initial,
@@ -120,6 +127,20 @@ export function ProviderEditor({
 
   function mutate(next: Partial<Draft>): void {
     setDraft((current) => ({ ...current, ...next }));
+  }
+
+  function syncDraftFromJson(json: string): void {
+    const parsed: unknown = JSON.parse(json);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
+    const value = parsed as Record<string, unknown>;
+    const next: Partial<Draft> = {};
+    if (typeof value["name"] === "string") next.name = value["name"];
+    if (typeof value["baseUrl"] === "string") next.baseUrl = value["baseUrl"];
+    if (value["api"] === "openai-completions" || value["api"] === "openai-responses" || value["api"] === "anthropic-messages") {
+      next.api = value["api"];
+    }
+    if (Array.isArray(value["models"])) next.models = value["models"] as ProviderInput["models"];
+    mutate(next);
   }
 
   function selectPreset(presetId: string): void {
@@ -191,8 +212,9 @@ export function ProviderEditor({
     setJsonParseError(null);
     try {
       const result = await onGetJson(initial.id);
-      setJsonText(result.json);
-      setJsonBase(result.json);
+      const preview = previewJson(result.json, draft);
+      setJsonText(preview);
+      setJsonBase(preview);
     } catch {
       setJsonText("");
       setJsonBase("");
@@ -283,6 +305,7 @@ export function ProviderEditor({
       const result = await onGetJson(initial.id);
       setJsonText(result.json);
       setJsonBase(result.json);
+      syncDraftFromJson(result.json);
       setJsonNotice(true);
     } catch {
       setJsonNotice(false);

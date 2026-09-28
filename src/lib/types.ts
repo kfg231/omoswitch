@@ -12,10 +12,9 @@ export interface BackupInfo { path: string; createdAt: string; sizeBytes: number
 export type ProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages";
 export type KeySource = "auth" | "inline" | "env" | "none";
 export type ModelInput = "text" | "image";
-export type Effort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-export type ThinkingMode = "effort" | "budget" | "google-level" | "anthropic-adaptive" | "anthropic-budget-effort";
-export interface ModelThinking { mode: ThinkingMode; efforts?: Effort[]; defaultLevel?: Effort; [key: string]: unknown; }
-export interface ProviderModel { id: string; name?: string; reasoning?: boolean; contextWindow?: number; maxTokens?: number; input?: ModelInput[]; thinking?: ModelThinking; [extra: string]: unknown; }
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ThinkingLevelMap = Partial<Record<ThinkingLevel, string | null>>;
+export interface ProviderModel { id: string; name?: string; reasoning?: boolean; contextWindow?: number; maxTokens?: number; input?: ModelInput[]; thinkingLevelMap?: ThinkingLevelMap; [extra: string]: unknown; }
 export interface ProviderInfo { id: string; name: string; baseUrl: string; api: ProviderApi; models: ProviderModel[]; enabled: boolean; hasKey: boolean; keySource: KeySource; inlineKey: boolean; knownToOmo: boolean; }
 export interface ProviderInput { id: string; name: string; baseUrl: string; api: ProviderApi; models: ProviderModel[]; inlineKey: boolean; }
 export interface ProvidersResult { agentDir: string; modelsJsonPath: string; providers: ProviderInfo[]; }

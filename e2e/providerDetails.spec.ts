@@ -42,15 +42,14 @@ test("editing context window, efforts and image input persists after reopening",
   await card.getByLabel("最大出力トークン（llama3.3）").fill("32000");
   await card.getByLabel("最大出力トークン（llama3.3）").blur();
 
+  await card.getByRole("switch", { name: "推論（llama3.3）" }).click();
   const efforts = card.getByRole("group", { name: "推論強度（llama3.3）" });
-  await efforts.getByRole("checkbox", { name: "低", exact: true }).check();
-  await efforts.getByRole("checkbox", { name: "高", exact: true }).check();
-  await card.getByLabel("既定の強度（llama3.3）").selectOption("high");
+  await efforts.getByRole("checkbox", { name: "最小", exact: true }).uncheck();
+  await efforts.getByRole("checkbox", { name: "最大", exact: true }).check();
 
   const inputs = card.getByRole("group", { name: "入力モダリティ（llama3.3）" });
   await inputs.getByRole("checkbox", { name: "テキスト" }).check();
   await inputs.getByRole("checkbox", { name: "画像" }).check();
-  await card.getByRole("switch", { name: "推論（llama3.3）" }).click();
 
   await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toBeHidden();
@@ -60,10 +59,10 @@ test("editing context window, efforts and image input persists after reopening",
   await expect(again.getByLabel("コンテキストウィンドウ（llama3.3）")).toHaveValue("1000000");
   await expect(again.getByLabel("最大出力トークン（llama3.3）")).toHaveValue("32000");
   const againEfforts = again.getByRole("group", { name: "推論強度（llama3.3）" });
-  await expect(againEfforts.getByRole("checkbox", { name: "低", exact: true })).toBeChecked();
+  await expect(againEfforts.getByRole("checkbox", { name: "最小", exact: true })).not.toBeChecked();
   await expect(againEfforts.getByRole("checkbox", { name: "高", exact: true })).toBeChecked();
-  await expect(againEfforts.getByRole("checkbox", { name: "中", exact: true })).not.toBeChecked();
-  await expect(again.getByLabel("既定の強度（llama3.3）")).toHaveValue("high");
+  await expect(againEfforts.getByRole("checkbox", { name: "最高", exact: true })).not.toBeChecked();
+  await expect(againEfforts.getByRole("checkbox", { name: "最大", exact: true })).toBeChecked();
   await expect(again.getByRole("checkbox", { name: "画像" })).toBeChecked();
   await expect(again.getByRole("switch", { name: "推論（llama3.3）" })).toHaveAttribute("aria-checked", "true");
 
@@ -75,8 +74,9 @@ test("editing context window, efforts and image input persists after reopening",
     maxTokens: 32000,
     reasoning: true,
     input: ["text", "image"],
-    thinking: { mode: "effort", efforts: ["low", "high"], defaultLevel: "high" },
+    thinkingLevelMap: { minimal: null, max: "max" },
   });
+  expect(body.models[0]).not.toHaveProperty("thinking");
 });
 
 test("an invalid number blocks saving until it is fixed", async ({ page }) => {
@@ -101,7 +101,7 @@ test("JSON tab shows redacted provider JSON, saves edits, and the form reflects 
   const dialog = await editProvider(page, "deepseek");
 
   const json = await openJsonTab(page, dialog);
-  await expect(dialog.getByText(/API キーは表示されません。/)).toBeVisible();
+  await expect(dialog.getByText(/保存するまで models\.json には書き込まれません。/)).toBeVisible();
   const text = await json.inputValue();
   expect(text).toContain('"deepseek-coder"');
   expect(text).toContain('"cost"');
@@ -126,6 +126,28 @@ test("JSON tab shows redacted provider JSON, saves edits, and the form reflects 
 
   const again = await openJsonTab(page, dialog);
   expect(await again.inputValue()).toContain("<redacted>");
+});
+
+test("the JSON tab previews unsaved form edits and does not write them until saved", async ({ page }) => {
+  await openApp(page);
+  await openProvidersView(page);
+  const dialog = await editProvider(page, "ollama");
+  const card = modelCard(dialog, "llama3.3");
+
+  await card.getByRole("switch", { name: "推論（llama3.3）" }).click();
+  const efforts = card.getByRole("group", { name: "推論強度（llama3.3）" });
+  await efforts.getByRole("checkbox", { name: "最小", exact: true }).uncheck();
+
+  const json = await openJsonTab(page, dialog);
+  const preview = JSON.parse(await json.inputValue()) as { models: Record<string, unknown>[] };
+  expect(preview.models[0]).toMatchObject({ reasoning: true, thinkingLevelMap: { minimal: null } });
+
+  await dialog.getByRole("button", { name: "キャンセル" }).click();
+  const reopened = await editProvider(page, "ollama");
+  const saved = JSON.parse(await (await openJsonTab(page, reopened)).inputValue()) as {
+    models: Record<string, unknown>[];
+  };
+  expect(saved.models[0]).not.toHaveProperty("thinkingLevelMap");
 });
 
 test("invalid JSON and apiKey are rejected, and unsaved JSON asks before switching tabs", async ({ page }) => {
@@ -177,10 +199,10 @@ test("adding and removing a custom model field round-trips through save", async 
   const dialog = await editProvider(page, "ollama");
   const card = modelCard(dialog, "llama3.3");
 
-  await card.getByLabel("キー（llama3.3）").fill("thinking");
+  await card.getByLabel("キー（llama3.3）").fill("thinkingLevelMap");
   await card.getByLabel("キー（llama3.3）").blur();
   await card.getByRole("button", { name: "項目を追加" }).click();
-  await expect(card.getByText("「thinking」は上のフォームで編集してください")).toBeVisible();
+  await expect(card.getByText("「thinkingLevelMap」は上のフォームで編集してください")).toBeVisible();
 
   await card.getByLabel("キー（llama3.3）").fill("cost");
   await card.getByLabel("キー（llama3.3）").blur();

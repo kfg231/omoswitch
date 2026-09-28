@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Effort, ModelInput, ModelThinking, ProviderModel } from "../lib/types";
+import { THINKING_LEVELS, isLevelEnabled, setLevelEnabled } from "../lib/thinking";
+import type { ModelInput, ProviderModel, ThinkingLevel } from "../lib/types";
 import { ImeSafeInput } from "./ImeSafeInput";
-import { Badge, Button, Field, SectionHeading, Select } from "./primitives";
+import { Button, Field, SectionHeading } from "./primitives";
 
 export interface ProviderModelsTableProps {
   models: ProviderModel[];
@@ -11,7 +12,6 @@ export interface ProviderModelsTableProps {
   fetched?: string[] | null;
 }
 
-export const EFFORTS: readonly Effort[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 export const MODEL_INPUTS: readonly ModelInput[] = ["text", "image"];
 export const MANAGED_MODEL_KEYS: readonly string[] = [
   "id",
@@ -20,7 +20,7 @@ export const MANAGED_MODEL_KEYS: readonly string[] = [
   "contextWindow",
   "maxTokens",
   "input",
-  "thinking",
+  "thinkingLevelMap",
 ];
 
 type CountKey = "contextWindow" | "maxTokens";
@@ -65,31 +65,6 @@ export function parseExtraValue(raw: string): ParsedValue {
     if (text.startsWith("{") || text.startsWith("[")) return { ok: false };
     return { ok: true, value: raw };
   }
-}
-
-function effortsOf(thinking: ModelThinking | undefined): Effort[] {
-  const listed = thinking?.efforts ?? [];
-  return EFFORTS.filter((effort) => listed.includes(effort));
-}
-
-export function applyEfforts(model: ProviderModel, efforts: Effort[]): ProviderModel {
-  const ordered = EFFORTS.filter((effort) => efforts.includes(effort));
-  const current = model.thinking;
-  const isEffortMode = current === undefined || current.mode === "effort";
-  if (ordered.length === 0) {
-    if (isEffortMode) return withKey(model, "thinking", undefined);
-    const kept: ModelThinking = { ...current };
-    delete kept.efforts;
-    delete kept.defaultLevel;
-    return withKey(model, "thinking", kept);
-  }
-  const next: ModelThinking = isEffortMode
-    ? { ...(current ?? {}), mode: "effort", efforts: ordered }
-    : { ...current, efforts: ordered };
-  if (next.defaultLevel !== undefined && !ordered.includes(next.defaultLevel)) {
-    delete next.defaultLevel;
-  }
-  return withKey(model, "thinking", next);
 }
 
 function extrasOf(model: ProviderModel): [string, unknown][] {
@@ -235,10 +210,9 @@ function ModelCard({ row, onPatch, onRemove }: ModelCardProps) {
   const [addError, setAddError] = useState<string | null>(null);
   const modelLabel = model.id.trim() === "" ? t("provider.newModel") : model.id;
   const scoped = (field: string): string => t("provider.scopedLabel", { field, model: modelLabel });
-  const efforts = effortsOf(model.thinking);
   const inputs = model.input ?? [];
-  const nonEffortMode =
-    model.thinking !== undefined && model.thinking.mode !== "effort" ? model.thinking.mode : null;
+  const levelMap = model.thinkingLevelMap;
+  const reasoningOn = model.reasoning === true;
 
   function setModel(next: ProviderModel, clear: string[] = []): void {
     onPatch((current) => {
@@ -261,21 +235,13 @@ function ModelCard({ row, onPatch, onRemove }: ModelCardProps) {
     setModel(withKey(model, key, parsed), [key]);
   }
 
-  function toggleEffort(effort: Effort, checked: boolean): void {
-    const next = checked ? [...efforts, effort] : efforts.filter((item) => item !== effort);
-    setModel(applyEfforts(model, next));
+  function levelChecked(level: ThinkingLevel): boolean {
+    if (levelMap === undefined) return level !== "xhigh" && level !== "max";
+    return isLevelEnabled(levelMap, level);
   }
 
-  function setDefaultLevel(value: string): void {
-    if (model.thinking === undefined) return;
-    const level = EFFORTS.find((effort) => effort === value);
-    const next: ModelThinking = { ...model.thinking };
-    if (level === undefined) {
-      delete next.defaultLevel;
-    } else {
-      next.defaultLevel = level;
-    }
-    setModel(withKey(model, "thinking", next));
+  function toggleLevel(level: ThinkingLevel, checked: boolean): void {
+    setModel(withKey(model, "thinkingLevelMap", setLevelEnabled(levelMap ?? {}, level, checked)));
   }
 
   function toggleInput(input: ModelInput, checked: boolean): void {
@@ -440,44 +406,38 @@ function ModelCard({ row, onPatch, onRemove }: ModelCardProps) {
       >
         <legend className={LEGEND}>{t("provider.efforts")}</legend>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          {EFFORTS.map((effort) => (
-            <label key={effort} className={CHIP}>
+          {THINKING_LEVELS.map((level) => (
+            <label key={level} className={`${CHIP} has-disabled:cursor-not-allowed has-disabled:opacity-50`}>
               <input
                 type="checkbox"
-                checked={efforts.includes(effort)}
-                onChange={(e) => toggleEffort(effort, e.target.checked)}
+                checked={reasoningOn && levelChecked(level)}
+                disabled={!reasoningOn}
+                onChange={(e) => toggleLevel(level, e.target.checked)}
                 className={CHIP_INPUT}
-                data-testid={`model-effort-${effort}`}
+                data-testid={`model-effort-${level}`}
               />
-              <span>{t(`reasoning.${effort}`)}</span>
+              <span>{t(`reasoning.${level}`)}</span>
             </label>
           ))}
-          <span className={NATIVE_KEY}>thinking.efforts</span>
+          <span className={NATIVE_KEY}>thinkingLevelMap</span>
         </div>
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2 text-xs text-ink-600 dark:text-ink-300">
-            <span>{t("provider.defaultEffort")}</span>
-            <Select
-              aria-label={scoped(t("provider.defaultEffort"))}
-              value={model.thinking?.defaultLevel ?? ""}
-              onChange={(e) => setDefaultLevel(e.target.value)}
-              disabled={efforts.length === 0}
-              className="w-auto py-1 text-xs focus:outline-none focus:ring-2 focus:ring-accent-500 dark:focus:ring-accent-400"
-              data-testid="model-default-effort"
+          <span className="text-micro text-ink-500 dark:text-ink-400" data-testid="model-levels-hint">
+            {!reasoningOn
+              ? t("provider.levelsNeedReasoning")
+              : levelMap === undefined
+                ? t("provider.levelsInferred")
+                : t("provider.levelsExplicit")}
+          </span>
+          {levelMap !== undefined ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setModel(withKey(model, "thinkingLevelMap", undefined))}
+              data-testid="model-levels-reset"
             >
-              <option value="">{t("reasoning.unset")}</option>
-              {efforts.map((effort) => (
-                <option key={effort} value={effort}>
-                  {t(`reasoning.${effort}`)}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <span className={NATIVE_KEY}>thinking.defaultLevel</span>
-          {nonEffortMode !== null ? (
-            <Badge tone="neutral" data-testid="model-thinking-mode">
-              {t("provider.thinkingMode", { mode: nonEffortMode })}
-            </Badge>
+              {t("provider.levelsReset")}
+            </Button>
           ) : null}
         </div>
       </fieldset>

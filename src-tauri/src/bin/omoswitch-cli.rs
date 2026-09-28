@@ -54,7 +54,7 @@ fn provider_models(args: &[String]) -> Result<Vec<ProviderModel>, AppError> {
                 name: None,
                 reasoning: None,
                 input: None,
-                thinking: None,
+                thinking_level_map: None,
                 context_window: None,
                 max_tokens: None,
                 extra: serde_json::Map::new(),
