@@ -266,4 +266,67 @@ describe("mock IPC backend", () => {
     expect(result.skipped).toContain("custom");
     expect(result.keysFound).toBeGreaterThan(0);
   });
+
+  it("reports providers whose missing model details were filled by import", async () => {
+    const first = await api.importProvidersFromOpencode();
+    expect(first.updated).toEqual(["deepseek"]);
+    const deepseek = (await api.listProviders()).providers.find((p) => p.id === "deepseek");
+    expect(deepseek!.models.every((model) => model.input !== undefined)).toBe(true);
+    expect((await api.importProvidersFromOpencode()).updated).toEqual([]);
+  });
+
+  it("returns provider JSON with flattened extras and redacted model headers", async () => {
+    const { json } = await api.getProviderJson("deepseek");
+    expect(json).not.toContain("MOCK-MODEL-HEADER-SECRET");
+    expect(json).not.toContain("apiKey");
+    const parsed = JSON.parse(json) as { models: Record<string, unknown>[] };
+    const coder = parsed.models.find((model) => model["id"] === "deepseek-coder")!;
+    expect(coder["headers"]).toEqual({ Authorization: "<redacted>" });
+    expect(coder["cost"]).toEqual({ input: 0.27, output: 1.1 });
+    expect(coder["thinking"]).toEqual({ mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" });
+    const listed = (await api.listProviders()).providers.find((p) => p.id === "deepseek")!;
+    expect(JSON.stringify(listed)).not.toContain("MOCK-MODEL-HEADER-SECRET");
+  });
+
+  it("saves provider JSON, restoring redacted values and dropping deleted keys", async () => {
+    const parsed = JSON.parse((await api.getProviderJson("deepseek")).json) as {
+      name: string;
+      models: Record<string, unknown>[];
+    };
+    parsed.name = "DeepSeek JSON";
+    const coder = parsed.models.find((model) => model["id"] === "deepseek-coder")!;
+    delete coder["cost"];
+    coder["contextWindow"] = 256000;
+    const saved = await api.saveProviderJson("deepseek", JSON.stringify(parsed));
+    expect(saved.name).toBe("DeepSeek JSON");
+    const savedCoder = saved.models.find((model) => model.id === "deepseek-coder")!;
+    expect("cost" in savedCoder).toBe(false);
+    expect(savedCoder.contextWindow).toBe(256000);
+    expect(savedCoder["headers"]).toEqual({ Authorization: "<redacted>" });
+
+    const again = JSON.parse((await api.getProviderJson("deepseek")).json) as { models: Record<string, unknown>[] };
+    await api.saveProviderJson("deepseek", JSON.stringify(again));
+    const reread = (await api.getProviderJson("deepseek")).json;
+    expect(reread).toContain("<redacted>");
+    expect(reread).not.toContain("cost");
+  });
+
+  it("rejects apiKey, bad JSON, and invalid fields in provider JSON", async () => {
+    const base = JSON.parse((await api.getProviderJson("ollama")).json) as Record<string, unknown>;
+    await expect(
+      api.saveProviderJson("ollama", JSON.stringify({ ...base, apiKey: "TEST-NOT-A-REAL-KEY" })),
+    ).rejects.toMatchObject({ kind: "invalidProvider", field: "apiKey" });
+    await expect(api.saveProviderJson("ollama", "{ nope")).rejects.toMatchObject({
+      kind: "invalidProvider",
+      field: "json",
+    });
+    await expect(api.saveProviderJson("ollama", "[]")).rejects.toMatchObject({ field: "json" });
+    await expect(
+      api.saveProviderJson("ollama", JSON.stringify({ ...base, baseUrl: "ftp://x" })),
+    ).rejects.toMatchObject({ field: "baseUrl" });
+    await expect(
+      api.saveProviderJson("ollama", JSON.stringify({ ...base, models: [{ id: "x", input: ["audio"] }] })),
+    ).rejects.toMatchObject({ field: "input" });
+    await expect(api.getProviderJson("nope")).rejects.toMatchObject({ kind: "providerNotFound" });
+  });
 });

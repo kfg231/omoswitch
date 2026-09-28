@@ -15,6 +15,7 @@ import type {
   ProfileInput,
   ProviderInfo,
   ProviderInput,
+  ProviderJson,
   ProvidersResult,
   Status,
   SwitchPreview as SwitchPreviewData,
@@ -306,6 +307,28 @@ export default function App() {
     }
   }
 
+  async function getProviderJson(id: string): Promise<ProviderJson> {
+    try {
+      const result = await api.getProviderJson(id);
+      setEditorError(null);
+      return result;
+    } catch (cause) {
+      setEditorError(toAppError(cause));
+      throw cause;
+    }
+  }
+
+  async function saveProviderJson(id: string, json: string): Promise<void> {
+    try {
+      replaceEditorInitial(await api.saveProviderJson(id, json));
+      setEditorError(null);
+      await refreshProviders();
+    } catch (cause) {
+      setEditorError(toAppError(cause));
+      throw cause;
+    }
+  }
+
   async function testProvider(id: string): Promise<void> {
     setProbes((current) => ({ ...current, [id]: "pending" }));
     try {
@@ -516,6 +539,7 @@ export default function App() {
                 key: "provider.importResult",
                 params: {
                   imported: String(result.imported.length),
+                  updated: String(result.updated.length),
                   skipped: String(result.skipped.length),
                 },
               });
@@ -550,6 +574,7 @@ export default function App() {
         open={editor !== null}
         initial={editor?.initial ?? null}
         prefillId={editor?.prefillId}
+        saved={editor !== null && !editor.isNew}
         error={editorError}
         onClose={() => {
           setEditor(null);
@@ -559,6 +584,8 @@ export default function App() {
         onSetKey={setProviderKey}
         onClearKey={clearProviderKey}
         onFetchModels={fetchProviderModels}
+        onGetJson={getProviderJson}
+        onSaveJson={saveProviderJson}
       />
 
       {preview !== null ? (

@@ -88,7 +88,17 @@ export function seedProviders(): ProviderInfo[] {
       api: "openai-completions",
       models: [
         { id: "deepseek-chat", name: "DeepSeek Chat", reasoning: false, contextWindow: 64000, maxTokens: 8192 },
-        { id: "deepseek-coder", name: "DeepSeek Coder", reasoning: false, contextWindow: 64000, maxTokens: 8192 },
+        {
+          id: "deepseek-coder",
+          name: "DeepSeek Coder",
+          reasoning: true,
+          contextWindow: 128000,
+          maxTokens: 32768,
+          input: ["text", "image"],
+          thinking: { mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" },
+          cost: { input: 0.27, output: 1.1 },
+          headers: { Authorization: "Bearer MOCK-MODEL-HEADER-SECRET" },
+        },
       ],
       enabled: true,
       hasKey: true,

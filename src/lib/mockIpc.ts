@@ -9,6 +9,7 @@ import type {
   BackupInfo,
   FetchedModels,
   ImportResult,
+  ModelInput,
   NativeCatalog,
   ProbeResult,
   Profile,
@@ -17,6 +18,8 @@ import type {
   ProviderImportResult,
   ProviderInfo,
   ProviderInput,
+  ProviderJson,
+  ProviderModel,
   ProvidersResult,
   Status,
   SwitchPreview,
@@ -63,6 +66,73 @@ function nowIso(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+const REDACTED = "<redacted>";
+const SENSITIVE_HEADER = /auth|key|token|secret|cookie/i;
+const VALID_APIS: readonly ProviderApi[] = ["openai-completions", "openai-responses", "anthropic-messages"];
+const VALID_INPUTS: readonly ModelInput[] = ["text", "image"];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function redactHeaders(headers: unknown): unknown {
+  if (!isRecord(headers)) return headers;
+  return Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => [
+      name,
+      SENSITIVE_HEADER.test(name) && typeof value === "string" ? REDACTED : value,
+    ]),
+  );
+}
+
+function restoreHeaders(incoming: unknown, previous: unknown): unknown {
+  if (!isRecord(incoming)) return incoming;
+  const prior = isRecord(previous) ? previous : {};
+  return Object.fromEntries(
+    Object.entries(incoming).map(([name, value]) => [
+      name,
+      value === REDACTED && typeof prior[name] === "string" ? prior[name] : value,
+    ]),
+  );
+}
+
+function redactModel(model: ProviderModel): ProviderModel {
+  return "headers" in model ? { ...model, headers: redactHeaders(model.headers) } : { ...model };
+}
+
+function restoreModels(models: ProviderModel[], previous: ProviderModel[]): ProviderModel[] {
+  return models.map((model) => {
+    if (!("headers" in model)) return model;
+    const prior = previous.find((candidate) => candidate.id === model.id);
+    return { ...model, headers: restoreHeaders(model.headers, prior?.["headers"]) };
+  });
+}
+
+function validateModels(value: unknown, requireIds: boolean): ProviderModel[] {
+  if (!Array.isArray(value)) fail("invalidProvider", "models must be an array", { field: "models" });
+  return value.map((entry: unknown): ProviderModel => {
+    if (!isRecord(entry)) fail("invalidProvider", "each model must be an object", { field: "models" });
+    const id = entry["id"];
+    if (typeof id !== "string" || (requireIds && id.trim() === "")) {
+      fail("invalidProvider", "each model needs a string id", { field: "models" });
+    }
+    const input = entry["input"];
+    if (
+      input !== undefined &&
+      !(Array.isArray(input) && input.every((item) => VALID_INPUTS.some((valid) => valid === item)))
+    ) {
+      fail("invalidProvider", `input must be a list of: ${VALID_INPUTS.join(", ")}`, { field: "input" });
+    }
+    for (const key of ["contextWindow", "maxTokens"] as const) {
+      const count = entry[key];
+      if (count !== undefined && !(typeof count === "number" && Number.isInteger(count) && count > 0)) {
+        fail("invalidProvider", `${key} must be a positive integer`, { field: key });
+      }
+    }
+    return entry as ProviderModel;
+  });
+}
+
 class MockBackend {
   private profiles = seedProfiles();
   private readonly models = seedModels();
@@ -75,6 +145,7 @@ class MockBackend {
   private providerProbes = new Map<string, ProbeResult | "fail">();
   private providerFetches = new Map<string, FetchedModels | "fail">();
   private catalogOverride: Partial<NativeCatalog> | "fail" = {};
+  private providerExtras = new Map<string, Record<string, unknown>>();
 
   setCatalog(catalog: Partial<NativeCatalog> | "fail"): void {
     this.catalogOverride = catalog;
@@ -293,11 +364,20 @@ class MockBackend {
     return provider;
   }
 
+  private present(provider: ProviderInfo): ProviderInfo {
+    return structuredClone({ ...provider, models: provider.models.map(redactModel) });
+  }
+
+  private replaceProvider(updated: ProviderInfo): ProviderInfo {
+    this.providers = this.providers.map((p) => (p.id === updated.id ? updated : p));
+    return this.present(updated);
+  }
+
   listProviders(): ProvidersResult {
     return {
       agentDir: AGENT_DIR,
       modelsJsonPath: MODELS_JSON_PATH,
-      providers: this.providers.map((p) => structuredClone(p)),
+      providers: this.providers.map((p) => this.present(p)),
     };
   }
 
@@ -308,29 +388,27 @@ class MockBackend {
     if (!/^https?:\/\/.+/.test(input.baseUrl)) {
       fail("invalidProvider", "baseUrl must start with http:// or https://", { field: "baseUrl" });
     }
-    const validApis: ProviderApi[] = ["openai-completions", "openai-responses", "anthropic-messages"];
-    if (!validApis.includes(input.api)) {
-      fail("invalidProvider", `api must be one of: ${validApis.join(", ")}`, { field: "api" });
+    if (!VALID_APIS.includes(input.api)) {
+      fail("invalidProvider", `api must be one of: ${VALID_APIS.join(", ")}`, { field: "api" });
     }
+    const models = validateModels(structuredClone(input.models), false);
     const existing = this.providers.find((p) => p.id === input.id);
     if (existing !== undefined) {
-      const updated: ProviderInfo = {
+      return this.replaceProvider({
         ...existing,
         name: input.name,
         baseUrl: input.baseUrl,
         api: input.api,
-        models: input.models,
+        models: restoreModels(models, existing.models),
         inlineKey: input.inlineKey,
-      };
-      this.providers = this.providers.map((p) => (p.id === updated.id ? updated : p));
-      return structuredClone(updated);
+      });
     }
     const created: ProviderInfo = {
       id: input.id,
       name: input.name,
       baseUrl: input.baseUrl,
       api: input.api,
-      models: input.models,
+      models,
       enabled: true,
       hasKey: false,
       keySource: "none",
@@ -338,18 +416,70 @@ class MockBackend {
       knownToOmo: false,
     };
     this.providers = [...this.providers, created];
-    return structuredClone(created);
+    return this.present(created);
   }
 
   deleteProvider(id: string): void {
     this.findProvider(id);
     this.providers = this.providers.filter((p) => p.id !== id);
+    this.providerExtras.delete(id);
+  }
+
+  getProviderJson(id: string): ProviderJson {
+    const provider = this.findProvider(id);
+    const extras = this.providerExtras.get(id) ?? {};
+    const body: Record<string, unknown> = {
+      name: provider.name,
+      baseUrl: provider.baseUrl,
+      api: provider.api,
+      models: provider.models.map(redactModel),
+    };
+    for (const [key, value] of Object.entries(extras)) {
+      body[key] = key === "headers" ? redactHeaders(value) : structuredClone(value);
+    }
+    return { json: JSON.stringify(body, null, 2) };
+  }
+
+  saveProviderJson(id: string, json: string): ProviderInfo {
+    const existing = this.findProvider(id);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(json);
+    } catch (cause) {
+      fail("invalidProvider", `invalid JSON: ${cause instanceof Error ? cause.message : String(cause)}`, {
+        field: "json",
+      });
+    }
+    if (!isRecord(parsed)) fail("invalidProvider", "provider JSON must be an object", { field: "json" });
+    if ("apiKey" in parsed) {
+      fail("invalidProvider", "apiKey cannot be set here; use the API key field", { field: "apiKey" });
+    }
+    const { name, baseUrl, api: providerApi, models, ...extras } = parsed;
+    if (typeof baseUrl !== "string" || !/^https?:\/\/.+/.test(baseUrl)) {
+      fail("invalidProvider", "baseUrl must start with http:// or https://", { field: "baseUrl" });
+    }
+    if (typeof providerApi !== "string" || !VALID_APIS.some((valid) => valid === providerApi)) {
+      fail("invalidProvider", `api must be one of: ${VALID_APIS.join(", ")}`, { field: "api" });
+    }
+    const nextModels = restoreModels(validateModels(models, true), existing.models);
+    const previousExtras = this.providerExtras.get(id) ?? {};
+    if ("headers" in extras) {
+      extras["headers"] = restoreHeaders(extras["headers"], previousExtras["headers"]);
+    }
+    this.providerExtras.set(id, extras);
+    return this.replaceProvider({
+      ...existing,
+      name: typeof name === "string" && name.trim() !== "" ? name : existing.id,
+      baseUrl,
+      api: providerApi as ProviderApi,
+      models: nextModels,
+    });
   }
 
   setProviderEnabled(id: string, enabled: boolean): ProviderInfo {
     const provider = this.findProvider(id);
     provider.enabled = enabled;
-    return structuredClone(provider);
+    return this.present(provider);
   }
 
   setProviderKey(id: string, key: string): ProviderInfo {
@@ -357,14 +487,14 @@ class MockBackend {
     if (key.trim() === "") fail("invalidProvider", "key cannot be empty", { field: "key" });
     provider.hasKey = true;
     provider.keySource = "auth";
-    return structuredClone(provider);
+    return this.present(provider);
   }
 
   clearProviderKey(id: string): ProviderInfo {
     const provider = this.findProvider(id);
     provider.hasKey = false;
     provider.keySource = "none";
-    return structuredClone(provider);
+    return this.present(provider);
   }
 
   testProvider(id: string): ProbeResult {
@@ -384,7 +514,15 @@ class MockBackend {
   }
 
   importProvidersFromOpencode(): ProviderImportResult {
-    return { imported: ["openai", "anthropic"], skipped: ["custom"], keysFound: 1 };
+    const updated: string[] = [];
+    const deepseek = this.providers.find((p) => p.id === "deepseek");
+    if (deepseek !== undefined && deepseek.models.some((model) => model.input === undefined)) {
+      deepseek.models = deepseek.models.map((model): ProviderModel =>
+        model.input === undefined ? { ...model, input: ["text"] } : model,
+      );
+      updated.push(deepseek.id);
+    }
+    return { imported: ["openai", "anthropic"], updated, skipped: ["custom"], keysFound: 1 };
   }
 }
 
@@ -451,6 +589,10 @@ export function installMockIpc(): OmoswitchMockControls {
         return backend.fetchProviderModels(arg<string>(payload, "id"));
       case "import_providers_from_opencode":
         return backend.importProvidersFromOpencode();
+      case "get_provider_json":
+        return backend.getProviderJson(arg<string>(payload, "id"));
+      case "save_provider_json":
+        return backend.saveProviderJson(arg<string>(payload, "id"), arg<string>(payload, "json"));
       default:
         return fail("io", `unknown command ${cmd}`);
     }

@@ -12,6 +12,7 @@ import type {
   ProviderImportResult,
   ProviderInfo,
   ProviderInput,
+  ProviderJson,
   ProvidersResult,
   Status,
   SwitchPreview,
@@ -47,6 +48,8 @@ export const api = {
   testProvider: (id: string) => invoke<ProbeResult>("test_provider", { id }),
   fetchProviderModels: (id: string) => invoke<FetchedModels>("fetch_provider_models", { id }),
   importProvidersFromOpencode: () => invoke<ProviderImportResult>("import_providers_from_opencode"),
+  getProviderJson: (id: string) => invoke<ProviderJson>("get_provider_json", { id }),
+  saveProviderJson: (id: string, json: string) => invoke<ProviderInfo>("save_provider_json", { id, json }),
 } as const;
 
 export type Api = typeof api;

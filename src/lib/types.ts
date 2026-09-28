@@ -11,13 +11,18 @@ export interface ModelInfo { id: string; provider: string; model: string; contex
 export interface BackupInfo { path: string; createdAt: string; sizeBytes: number; }
 export type ProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages";
 export type KeySource = "auth" | "inline" | "env" | "none";
-export interface ProviderModel { id: string; name?: string; reasoning?: boolean; contextWindow?: number; maxTokens?: number; }
+export type ModelInput = "text" | "image";
+export type Effort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ThinkingMode = "effort" | "budget" | "google-level" | "anthropic-adaptive" | "anthropic-budget-effort";
+export interface ModelThinking { mode: ThinkingMode; efforts?: Effort[]; defaultLevel?: Effort; [key: string]: unknown; }
+export interface ProviderModel { id: string; name?: string; reasoning?: boolean; contextWindow?: number; maxTokens?: number; input?: ModelInput[]; thinking?: ModelThinking; [extra: string]: unknown; }
 export interface ProviderInfo { id: string; name: string; baseUrl: string; api: ProviderApi; models: ProviderModel[]; enabled: boolean; hasKey: boolean; keySource: KeySource; inlineKey: boolean; knownToOmo: boolean; }
 export interface ProviderInput { id: string; name: string; baseUrl: string; api: ProviderApi; models: ProviderModel[]; inlineKey: boolean; }
 export interface ProvidersResult { agentDir: string; modelsJsonPath: string; providers: ProviderInfo[]; }
 export interface ProbeResult { reachable: boolean; status: number | null; latencyMs: number; tier: "fast" | "ok" | "slow"; errorKind: "dns" | "tls" | "connect" | "timeout" | null; }
 export interface FetchedModels { source: "models" | "v1/models"; ids: string[]; }
-export interface ProviderImportResult { imported: string[]; skipped: string[]; keysFound: number; }
+export interface ProviderImportResult { imported: string[]; updated: string[]; skipped: string[]; keysFound: number; }
+export interface ProviderJson { json: string; }
 export type CatalogSource = "installed" | "cache" | "builtin";
 export interface NativeCatalog { agents: string[]; categories: string[]; source: CatalogSource; omoVersion: string | null; fetchedAt: string | null; }
 export type AppErrorKind = "configMissing" | "malformedJsonc" | "duplicateKey" | "changedOnDisk" | "verifyFailed" | "omoNotFound" | "omoListParse" | "io" | "storeCorrupt" | "profileNotFound" | "invalidProfile" | "notAnObject" | "providerNotFound" | "invalidProvider" | "networkUnreachable" | "modelFetchParse";

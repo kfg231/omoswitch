@@ -119,3 +119,158 @@ describe("ProviderModelsTable", () => {
     expect(screen.queryByText("Select models to add")).toBeNull();
   });
 });
+
+function lastModels(onChange: ReturnType<typeof vi.fn>): ProviderModel[] {
+  const calls = onChange.mock.calls;
+  return calls[calls.length - 1]![0] as ProviderModel[];
+}
+
+function commit(element: HTMLElement, value: string): void {
+  fireEvent.focus(element);
+  fireEvent.change(element, { target: { value } });
+  fireEvent.blur(element);
+}
+
+describe("ProviderModelsTable model details", () => {
+  it("writes contextWindow as a number and removes the key when cleared", () => {
+    const onChange = vi.fn();
+    render(<ProviderModelsTable models={[{ id: "m", maxTokens: 8192 }]} onChange={onChange} />);
+    const context = screen.getByTestId("model-context-input");
+
+    commit(context, "1000000");
+    expect(lastModels(onChange)).toEqual([{ id: "m", maxTokens: 8192, contextWindow: 1000000 }]);
+
+    commit(context, "");
+    expect(lastModels(onChange)).toEqual([{ id: "m", maxTokens: 8192 }]);
+    expect("contextWindow" in lastModels(onChange)[0]!).toBe(false);
+  });
+
+  it("blocks save with an inline error for a non-positive or non-integer number", () => {
+    const onChange = vi.fn();
+    const onValidityChange = vi.fn();
+    render(
+      <ProviderModelsTable
+        models={[{ id: "m", contextWindow: 64000 }]}
+        onChange={onChange}
+        onValidityChange={onValidityChange}
+      />,
+    );
+    const maxTokens = screen.getByTestId("model-max-tokens-input");
+
+    commit(maxTokens, "1.5");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onValidityChange).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole("alert").textContent).toBe("provider.countInvalid");
+    expect((maxTokens as HTMLInputElement).value).toBe("1.5");
+
+    commit(maxTokens, "0");
+    expect(onValidityChange).toHaveBeenLastCalledWith(false);
+
+    commit(maxTokens, "32000");
+    expect(onValidityChange).toHaveBeenLastCalledWith(true);
+    expect(lastModels(onChange)).toEqual([{ id: "m", contextWindow: 64000, maxTokens: 32000 }]);
+  });
+
+  it("maps effort checkboxes to an ordered thinking.efforts and removes it when none are left", () => {
+    const onChange = vi.fn();
+    render(<ProviderModelsTable models={[{ id: "m" }]} onChange={onChange} />);
+
+    fireEvent.click(screen.getByTestId("model-effort-high"));
+    fireEvent.click(screen.getByTestId("model-effort-low"));
+    expect(lastModels(onChange)).toEqual([{ id: "m", thinking: { mode: "effort", efforts: ["low", "high"] } }]);
+
+    fireEvent.change(screen.getByTestId("model-default-effort"), { target: { value: "high" } });
+    expect(lastModels(onChange)[0]!.thinking).toEqual({ mode: "effort", efforts: ["low", "high"], defaultLevel: "high" });
+
+    fireEvent.click(screen.getByTestId("model-effort-high"));
+    expect(lastModels(onChange)[0]!.thinking).toEqual({ mode: "effort", efforts: ["low"] });
+
+    fireEvent.click(screen.getByTestId("model-effort-low"));
+    expect(lastModels(onChange)).toEqual([{ id: "m" }]);
+  });
+
+  it("keeps a non-effort thinking object and shows its mode read-only", () => {
+    const onChange = vi.fn();
+    const thinking = { mode: "budget" as const, budgetTokens: 4096 };
+    render(<ProviderModelsTable models={[{ id: "m", thinking }]} onChange={onChange} />);
+
+    expect(screen.getByTestId("model-thinking-mode")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("model-effort-medium"));
+    expect(lastModels(onChange)[0]!.thinking).toEqual({ mode: "budget", budgetTokens: 4096, efforts: ["medium"] });
+    fireEvent.click(screen.getByTestId("model-effort-medium"));
+    expect(lastModels(onChange)[0]!.thinking).toEqual({ mode: "budget", budgetTokens: 4096 });
+  });
+
+  it("toggles input modalities in order and omits input when empty", () => {
+    const onChange = vi.fn();
+    render(<ProviderModelsTable models={[{ id: "m" }]} onChange={onChange} />);
+
+    fireEvent.click(screen.getByTestId("model-input-image"));
+    fireEvent.click(screen.getByTestId("model-input-text"));
+    expect(lastModels(onChange)).toEqual([{ id: "m", input: ["text", "image"] }]);
+
+    fireEvent.click(screen.getByTestId("model-input-text"));
+    fireEvent.click(screen.getByTestId("model-input-image"));
+    expect(lastModels(onChange)).toEqual([{ id: "m" }]);
+  });
+
+  it("adds and removes a custom field, parsing JSON values", () => {
+    const onChange = vi.fn();
+    render(<ProviderModelsTable models={[{ id: "m" }]} onChange={onChange} />);
+
+    commit(screen.getByTestId("model-extra-new-key"), "cost");
+    commit(screen.getByTestId("model-extra-new-value"), '{"input": 0.5}');
+    fireEvent.click(screen.getByTestId("model-extra-add"));
+    expect(lastModels(onChange)).toEqual([{ id: "m", cost: { input: 0.5 } }]);
+    expect((screen.getByTestId("model-extra-value") as HTMLInputElement).value).toBe('{"input":0.5}');
+
+    commit(screen.getByTestId("model-extra-value"), "plain text");
+    expect(lastModels(onChange)).toEqual([{ id: "m", cost: "plain text" }]);
+
+    fireEvent.click(screen.getByTestId("model-extra-remove"));
+    expect(lastModels(onChange)).toEqual([{ id: "m" }]);
+  });
+
+  it("rejects managed keys and malformed JSON-looking values", () => {
+    const onChange = vi.fn();
+    render(<ProviderModelsTable models={[{ id: "m" }]} onChange={onChange} />);
+
+    commit(screen.getByTestId("model-extra-new-key"), "contextWindow");
+    commit(screen.getByTestId("model-extra-new-value"), "1");
+    fireEvent.click(screen.getByTestId("model-extra-add"));
+    expect(screen.getByRole("alert").textContent).toBe("provider.customKeyManaged");
+
+    commit(screen.getByTestId("model-extra-new-key"), "compat");
+    commit(screen.getByTestId("model-extra-new-value"), "{broken");
+    fireEvent.click(screen.getByTestId("model-extra-add"));
+    expect(screen.getByRole("alert").textContent).toBe("provider.customValueInvalid");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("preserves unknown extras untouched when editing other fields", () => {
+    const onChange = vi.fn();
+    const headers = { Authorization: "<redacted>" };
+    const cost = { input: 0.27, output: 1.1 };
+    render(<ProviderModelsTable models={[{ id: "m", cost, headers }]} onChange={onChange} />);
+
+    commit(screen.getByTestId("model-context-input"), "128000");
+    const [model] = lastModels(onChange);
+    expect(model).toEqual({ id: "m", cost, headers, contextWindow: 128000 });
+    expect(model!["cost"]).toBe(cost);
+    expect(model!["headers"]).toBe(headers);
+  });
+
+  it("starts merged fetched models with no details", () => {
+    const onChange = vi.fn();
+    render(
+      <ProviderModelsTable
+        models={[{ id: "a", contextWindow: 1000, input: ["text"] }]}
+        onChange={onChange}
+        fetched={["a", "b"]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("fetched-model-b"));
+    fireEvent.click(screen.getByTestId("fetched-add"));
+    expect(lastModels(onChange)).toEqual([{ id: "a", contextWindow: 1000, input: ["text"] }, { id: "b" }]);
+  });
+});

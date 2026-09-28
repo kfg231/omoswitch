@@ -61,6 +61,8 @@ describe("ProviderEditor", () => {
         onSetKey={onSetKey}
         onClearKey={onClearKey}
         onFetchModels={onFetchModels}
+        onGetJson={vi.fn()}
+        onSaveJson={vi.fn()}
       />
     );
 
@@ -96,6 +98,8 @@ describe("ProviderEditor", () => {
         onSetKey={onSetKey}
         onClearKey={onClearKey}
         onFetchModels={onFetchModels}
+        onGetJson={vi.fn()}
+        onSaveJson={vi.fn()}
       />
     );
 
