@@ -155,23 +155,28 @@ export function AssignmentRow({
         </Field>
 
         <Field label={t("editor.reasoning")} labelHidden>
-          {(field) => (
-            <Select
-              {...field}
-              value={parts.reasoning ?? ""}
-              onChange={(event) => {
-                const raw = event.target.value;
-                update({ reasoning: isReasoning(raw) ? raw : null });
-              }}
-            >
-              <option value="">{t("reasoning.unset")}</option>
-              {REASONING_LEVELS.map((level) => (
-                <option key={level} value={level}>
-                  {t(`reasoning.${level}`)}
-                </option>
-              ))}
-            </Select>
-          )}
+          {(field) => {
+            const selectedModel = models.find((m) => m.id === parts.model);
+            const supportsReasoning = selectedModel?.thinking ?? true;
+            return (
+              <Select
+                {...field}
+                value={parts.reasoning ?? ""}
+                disabled={!supportsReasoning}
+                onChange={(event) => {
+                  const raw = event.target.value;
+                  update({ reasoning: isReasoning(raw) ? raw : null });
+                }}
+              >
+                <option value="">{t("reasoning.unset")}</option>
+                {REASONING_LEVELS.map((level) => (
+                  <option key={level} value={level}>
+                    {t(`reasoning.${level}`)}
+                  </option>
+                ))}
+              </Select>
+            );
+          }}
         </Field>
 
         <IconButton label={t("editor.removeEntry")} onClick={onRemove} className="justify-self-end">
