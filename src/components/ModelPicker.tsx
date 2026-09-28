@@ -5,6 +5,8 @@ import type { ModelInfo, ProviderInfo } from "../lib/types";
 import { ImeSafeInput } from "./ImeSafeInput";
 import { Badge, Button } from "./primitives";
 
+export const MODEL_PICKER_LIMIT = 200;
+
 export interface ModelPickerProps {
   id: string;
   value: string;
@@ -13,7 +15,7 @@ export interface ModelPickerProps {
   omoAvailable: boolean;
   describedBy?: string;
   onChange: (value: string) => void;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void>;
 }
 
 export function ModelPicker({
@@ -29,8 +31,9 @@ export function ModelPicker({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
-  // What the user is typing; filters the list without waiting for an IME commit.
-  const [query, setQuery] = useState(value);
+  // Only what the user typed since the list opened; opening always starts unfiltered.
+  const [query, setQuery] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   // Bumped after a pick so ImeSafeInput remounts with the picked value instead of a stale draft.
   const [revision, setRevision] = useState(0);
   const listId = useId();
@@ -41,19 +44,13 @@ export function ModelPicker({
 
   const options = useMemo(() => mergeModelOptions(models, providers), [models, providers]);
 
-  const matches = useMemo(() => {
+  const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (needle === "") return options.slice(0, 40);
-    return options.filter((option) => option.id.toLowerCase().includes(needle)).slice(0, 40);
+    if (needle === "") return options;
+    return options.filter((option) => option.id.toLowerCase().includes(needle));
   }, [options, query]);
 
-  useEffect(() => {
-    if (document.activeElement !== inputRef.current) setQuery(value);
-  }, [value]);
-
-  useEffect(() => {
-    setHighlight(0);
-  }, [query]);
+  const matches = useMemo(() => filtered.slice(0, MODEL_PICKER_LIMIT), [filtered]);
 
   useEffect(() => {
     if (revision === 0) return;
@@ -61,9 +58,22 @@ export function ModelPicker({
     inputRef.current?.focus();
   }, [revision]);
 
+  const activeId = open && matches[highlight] !== undefined ? `${listId}-opt-${highlight}` : undefined;
+
+  useEffect(() => {
+    if (activeId === undefined) return;
+    document.getElementById(activeId)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeId]);
+
   const hint = omoAvailable ? t("modelPicker.freeTextHint") : t("modelPicker.omoMissingHint");
   const hintId = `${listId}-hint`;
-  const activeId = open && matches[highlight] !== undefined ? `${listId}-opt-${highlight}` : undefined;
+
+  function openList(): void {
+    setQuery("");
+    const selected = options.slice(0, MODEL_PICKER_LIMIT).findIndex((option) => option.id === value);
+    setHighlight(selected === -1 ? 0 : selected);
+    setOpen(true);
+  }
 
   function push(next: string): void {
     if (pickingRef.current || next === value) return;
@@ -74,9 +84,18 @@ export function ModelPicker({
     onChange(next);
     pickingRef.current = true;
     suppressOpenRef.current = true;
-    setQuery(next);
+    setQuery("");
     setOpen(false);
     setRevision((current) => current + 1);
+  }
+
+  async function refresh(): Promise<void> {
+    setRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   return (
@@ -101,6 +120,7 @@ export function ModelPicker({
             onInput={(event) => {
               const next = event.currentTarget.value;
               setQuery(next);
+              setHighlight(0);
               setOpen(true);
               if (!composingRef.current) push(next);
             }}
@@ -116,14 +136,17 @@ export function ModelPicker({
                 suppressOpenRef.current = false;
                 return;
               }
-              setOpen(true);
+              openList();
             }}
             onBlur={() => setOpen(false)}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing || composingRef.current) return;
               if (event.key === "ArrowDown") {
                 event.preventDefault();
-                setOpen(true);
+                if (!open) {
+                  openList();
+                  return;
+                }
                 setHighlight((current) => (matches.length === 0 ? 0 : (current + 1) % matches.length));
               } else if (event.key === "ArrowUp") {
                 event.preventDefault();
@@ -143,55 +166,74 @@ export function ModelPicker({
             }}
           />
           {open ? (
-            <ul
-              id={listId}
-              role="listbox"
-              aria-label={t("modelPicker.title")}
+            <div
               onMouseDown={(event) => event.preventDefault()}
-              className="rounded-panel absolute z-30 mt-1 max-h-64 w-full overflow-y-auto bg-ink-50 py-1 shadow-xl ring-1 ring-ink-300 dark:bg-ink-800 dark:ring-ink-700"
+              className="rounded-panel absolute z-30 mt-1 w-full overflow-hidden bg-ink-50 shadow-xl ring-1 ring-ink-300 dark:bg-ink-800 dark:ring-ink-700"
             >
-              {matches.length === 0 ? (
-                <li className="px-2.5 py-1.5 text-micro text-ink-500 dark:text-ink-400">
-                  {t("modelPicker.empty")}
-                </li>
-              ) : (
-                matches.map((option, index) => (
-                  <li
-                    key={`${option.source}:${option.id}`}
-                    id={`${listId}-opt-${index}`}
-                    role="option"
-                    aria-selected={option.id === value}
-                    data-source={option.source}
-                    onMouseEnter={() => setHighlight(index)}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      pick(option.id);
-                    }}
-                    className={`flex cursor-pointer items-center justify-between gap-3 px-2.5 py-1.5 font-mono text-xs ${
-                      index === highlight
-                        ? "bg-ink-200/80 text-ink-900 dark:bg-ink-700 dark:text-ink-50"
-                        : "text-ink-700 dark:text-ink-200"
-                    }`}
-                  >
-                    <span className="min-w-0 truncate">{option.id}</span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      {option.context !== null ? (
-                        <span className="text-micro text-ink-500 dark:text-ink-400">{option.context}</span>
-                      ) : null}
-                      <Badge tone={option.source === "configured" ? "accent" : "neutral"}>
-                        {option.source === "configured"
-                          ? t("provider.sourceConfigured")
-                          : t("provider.sourceOmo")}
-                      </Badge>
-                    </span>
+              <ul
+                id={listId}
+                role="listbox"
+                aria-label={t("modelPicker.title")}
+                className="max-h-64 overflow-y-auto py-1"
+              >
+                {matches.length === 0 ? (
+                  <li className="px-2.5 py-1.5 text-micro text-ink-500 dark:text-ink-400">
+                    {t("modelPicker.empty")}
                   </li>
-                ))
-              )}
-            </ul>
+                ) : (
+                  matches.map((option, index) => (
+                    <li
+                      key={`${option.source}:${option.id}`}
+                      id={`${listId}-opt-${index}`}
+                      role="option"
+                      aria-selected={option.id === value}
+                      data-source={option.source}
+                      onMouseEnter={() => setHighlight(index)}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        pick(option.id);
+                      }}
+                      className={`flex cursor-pointer items-center justify-between gap-3 px-2.5 py-1.5 font-mono text-xs ${
+                        index === highlight
+                          ? "bg-ink-200/80 text-ink-900 dark:bg-ink-700 dark:text-ink-50"
+                          : option.id === value
+                            ? "bg-ink-200/40 text-ink-900 dark:bg-ink-700/50 dark:text-ink-50"
+                            : "text-ink-700 dark:text-ink-200"
+                      }`}
+                    >
+                      <span className="min-w-0 truncate">{option.id}</span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        {option.context !== null ? (
+                          <span className="text-micro text-ink-500 dark:text-ink-400">{option.context}</span>
+                        ) : null}
+                        <Badge tone={option.source === "configured" ? "accent" : "neutral"}>
+                          {option.source === "configured"
+                            ? t("provider.sourceConfigured")
+                            : t("provider.sourceOmo")}
+                        </Badge>
+                      </span>
+                    </li>
+                  ))
+                )}
+              </ul>
+              <p
+                data-testid="model-picker-count"
+                className="border-t border-ink-200 px-2.5 py-1 text-micro text-ink-500 tabular-nums dark:border-ink-700 dark:text-ink-400"
+              >
+                {filtered.length > matches.length
+                  ? t("modelPicker.truncated", { total: filtered.length, shown: matches.length })
+                  : t("modelPicker.count", { count: filtered.length, total: options.length })}
+              </p>
+            </div>
           ) : null}
         </div>
-        <Button size="sm" onClick={onRefresh}>
-          {t("modelPicker.refresh")}
+        <Button
+          size="sm"
+          disabled={refreshing}
+          aria-busy={refreshing}
+          onClick={() => void refresh()}
+        >
+          {refreshing ? t("modelPicker.refreshing") : t("modelPicker.refresh")}
         </Button>
       </div>
       <p

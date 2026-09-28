@@ -27,7 +27,8 @@ export interface AssignmentRowProps {
   modelError?: string;
   onChange: (next: Assignment) => void;
   onRemove: () => void;
-  onRefreshModels: () => void;
+  onRefreshModels: () => Promise<void>;
+  knownKeys: readonly string[];
 }
 
 function stringifyExtra(extra: Record<string, unknown>): string {
@@ -47,6 +48,7 @@ export function AssignmentRow({
   onChange,
   onRemove,
   onRefreshModels,
+  knownKeys,
 }: AssignmentRowProps) {
   const { t } = useTranslation();
   const parts = splitAssignment(assignment);
@@ -105,7 +107,8 @@ export function AssignmentRow({
     providers,
   );
 
-  const known = section === "agents" ? isNativeAgent(entryKey) : isNativeCategory(entryKey);
+  const known =
+    section === "agents" ? isNativeAgent(entryKey, knownKeys) : isNativeCategory(entryKey, knownKeys);
   const legacyTarget =
     section === "agents" ? legacyAgentTarget(entryKey) : legacyCategoryTarget(entryKey);
   const unknownHint = known

@@ -21,6 +21,15 @@ interface MockControls {
   setProviderProbe: (id: string, result: MockProbe | "fail") => void;
   setProviderFetch: (id: string, result: MockFetchedModels | "fail") => void;
   setKeyPresent: (id: string, present: boolean) => void;
+  setCatalog: (catalog: Partial<MockCatalog> | "fail") => void;
+}
+
+export interface MockCatalog {
+  agents: string[];
+  categories: string[];
+  source: "installed" | "cache" | "builtin";
+  omoVersion: string | null;
+  fetchedAt: string | null;
 }
 
 type MockWindow = { __omoswitchMock?: MockControls };
@@ -117,6 +126,12 @@ export async function setProviderFetch(
     },
     [id, result] as const,
   );
+}
+
+export async function setCatalog(page: Page, catalog: Partial<MockCatalog> | "fail"): Promise<void> {
+  await page.evaluate((value) => {
+    (globalThis as MockWindow).__omoswitchMock?.setCatalog(value);
+  }, catalog);
 }
 
 export async function setKeyPresent(page: Page, id: string, present: boolean): Promise<void> {

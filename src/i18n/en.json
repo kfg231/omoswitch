@@ -93,7 +93,15 @@
     "legacyKeyBadge": "Legacy name",
     "legacyKeyHint": "\"{{key}}\" is a legacy name. The canonical key is \"{{target}}\".",
     "saved": "Profile saved",
-    "emptySelection": "Select a profile from the list on the left"
+    "emptySelection": "Select a profile from the list on the left",
+    "fetchCatalog": "Fetch latest agent definitions",
+    "fetchingCatalog": "Fetching…",
+    "catalogSource": "Definitions: {{source}}",
+    "catalogSourceInstalled": "omo {{version}}",
+    "catalogSourceCache": "omo {{version}} (cached)",
+    "catalogSourceBuiltin": "built-in",
+    "catalogVersionUnknown": "unknown version",
+    "catalogFetched": "Fetched from {{source}}: {{agents}} agents / {{categories}} categories ({{added}} rows added)"
   },
   "modelPicker": {
     "title": "Pick a model",
@@ -101,6 +109,9 @@
     "freeText": "Free text",
     "freeTextHint": "Enter as provider/model",
     "refresh": "Refresh list",
+    "refreshing": "Refreshing…",
+    "count": "{{count}} of {{total}} models",
+    "truncated": "Showing {{shown}} of {{total}} — type to filter",
     "cached": "Showing cached results",
     "omoMissingHint": "omo command not found. Use the cache or free text instead.",
     "empty": "No matching models",

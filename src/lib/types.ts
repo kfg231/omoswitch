@@ -18,5 +18,7 @@ export interface ProvidersResult { agentDir: string; modelsJsonPath: string; pro
 export interface ProbeResult { reachable: boolean; status: number | null; latencyMs: number; tier: "fast" | "ok" | "slow"; errorKind: "dns" | "tls" | "connect" | "timeout" | null; }
 export interface FetchedModels { source: "models" | "v1/models"; ids: string[]; }
 export interface ProviderImportResult { imported: string[]; skipped: string[]; keysFound: number; }
+export type CatalogSource = "installed" | "cache" | "builtin";
+export interface NativeCatalog { agents: string[]; categories: string[]; source: CatalogSource; omoVersion: string | null; fetchedAt: string | null; }
 export type AppErrorKind = "configMissing" | "malformedJsonc" | "duplicateKey" | "changedOnDisk" | "verifyFailed" | "omoNotFound" | "omoListParse" | "io" | "storeCorrupt" | "profileNotFound" | "invalidProfile" | "notAnObject" | "providerNotFound" | "invalidProvider" | "networkUnreachable" | "modelFetchParse";
 export interface AppError { kind: AppErrorKind; message: string; line?: number; col?: number; key?: string; field?: string; }

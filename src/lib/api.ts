@@ -5,6 +5,7 @@ import type {
   FetchedModels,
   ImportResult,
   ModelInfo,
+  NativeCatalog,
   ProbeResult,
   Profile,
   ProfileInput,
@@ -34,6 +35,7 @@ export const api = {
   applyProfile: (id: string, expectedHash?: string) =>
     invoke<ApplyResult>("apply_profile", expectedHash === undefined ? { id } : { id, expectedHash }),
   listModels: (refresh: boolean) => invoke<ModelInfo[]>("list_models", { refresh }),
+  getNativeCatalog: (refresh: boolean) => invoke<NativeCatalog>("get_native_catalog", { refresh }),
   listBackups: () => invoke<BackupInfo[]>("list_backups"),
   restoreBackup: (path: string) => invoke<ApplyResult>("restore_backup", { path }),
   listProviders: () => invoke<ProvidersResult>("list_providers"),

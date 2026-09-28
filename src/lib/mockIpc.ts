@@ -1,5 +1,6 @@
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { InvokeArgs } from "@tauri-apps/api/core";
+import { BUILTIN_CATALOG } from "./catalog";
 import { seedModels, seedProfiles, seedProviders } from "./mockData";
 import type {
   AppError,
@@ -8,6 +9,7 @@ import type {
   BackupInfo,
   FetchedModels,
   ImportResult,
+  NativeCatalog,
   ProbeResult,
   Profile,
   ProfileInput,
@@ -26,6 +28,7 @@ export interface OmoswitchMockControls {
   setProviderProbe: (id: string, result: ProbeResult | "fail") => void;
   setProviderFetch: (id: string, result: FetchedModels | "fail") => void;
   setKeyPresent: (id: string, present: boolean) => void;
+  setCatalog: (catalog: Partial<NativeCatalog> | "fail") => void;
 }
 
 declare global {
@@ -71,6 +74,24 @@ class MockBackend {
   private nextId = 3;
   private providerProbes = new Map<string, ProbeResult | "fail">();
   private providerFetches = new Map<string, FetchedModels | "fail">();
+  private catalogOverride: Partial<NativeCatalog> | "fail" = {};
+
+  setCatalog(catalog: Partial<NativeCatalog> | "fail"): void {
+    this.catalogOverride = catalog;
+  }
+
+  getNativeCatalog(refresh: boolean): NativeCatalog {
+    if (!refresh) return structuredClone(BUILTIN_CATALOG);
+    if (this.catalogOverride === "fail") fail("io", "failed to read the installed omo agent registry");
+    return {
+      agents: [...BUILTIN_CATALOG.agents],
+      categories: [...BUILTIN_CATALOG.categories],
+      source: "installed",
+      omoVersion: "5.0.1",
+      fetchedAt: nowIso(),
+      ...this.catalogOverride,
+    };
+  }
 
   setDrift(drifted: boolean): void {
     this.drifted = drifted;
@@ -406,6 +427,8 @@ export function installMockIpc(): OmoswitchMockControls {
       }
       case "list_models":
         return backend.listModels(arg<boolean>(payload, "refresh"));
+      case "get_native_catalog":
+        return backend.getNativeCatalog(arg<boolean>(payload, "refresh"));
       case "list_backups":
         return backend.listBackups();
       case "restore_backup":
@@ -439,6 +462,7 @@ export function installMockIpc(): OmoswitchMockControls {
     setProviderProbe: (id, result) => backend.setProviderProbe(id, result),
     setProviderFetch: (id, result) => backend.setProviderFetch(id, result),
     setKeyPresent: (id, present) => backend.setKeyPresent(id, present),
+    setCatalog: (catalog) => backend.setCatalog(catalog),
   };
   window.__omoswitchMock = controls;
   return controls;

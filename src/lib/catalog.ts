@@ -1,4 +1,4 @@
-import type { Reasoning } from "./types";
+import type { NativeCatalog, Reasoning } from "./types";
 
 // Native's builtin agent registry (senpi-task/src/agents/builtin). Keys outside
 // this list are accepted by the schema but dropped when native resolves them.
@@ -55,12 +55,20 @@ export function isReasoning(value: unknown): value is Reasoning {
   return typeof value === "string" && REASONING_LEVELS.some((level) => level === value);
 }
 
-export function isNativeAgent(key: string): boolean {
-  return KNOWN_AGENTS.some((agent) => agent === key);
+export const BUILTIN_CATALOG: NativeCatalog = {
+  agents: [...KNOWN_AGENTS],
+  categories: [...KNOWN_CATEGORIES],
+  source: "builtin",
+  omoVersion: null,
+  fetchedAt: null,
+};
+
+export function isNativeAgent(key: string, agents: readonly string[] = KNOWN_AGENTS): boolean {
+  return agents.includes(key);
 }
 
-export function isNativeCategory(key: string): boolean {
-  return KNOWN_CATEGORIES.some((category) => category === key);
+export function isNativeCategory(key: string, categories: readonly string[] = KNOWN_CATEGORIES): boolean {
+  return categories.includes(key);
 }
 
 export function legacyAgentTarget(key: string): string | null {

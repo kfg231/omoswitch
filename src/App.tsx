@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type ImportSource } from "./lib/api";
+import { BUILTIN_CATALOG } from "./lib/catalog";
 import { getPreset } from "./lib/providerCatalog";
 import type {
   AppError,
@@ -8,6 +9,7 @@ import type {
   FetchedModels,
   ImportResult,
   ModelInfo,
+  NativeCatalog,
   ProbeResult,
   Profile,
   ProfileInput,
@@ -71,6 +73,7 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [catalog, setCatalog] = useState<NativeCatalog>(BUILTIN_CATALOG);
   const [providersResult, setProvidersResult] = useState<ProvidersResult | null>(null);
   const [probes, setProbes] = useState<Record<string, ProbeResult | "pending" | undefined>>({});
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -124,6 +127,20 @@ export default function App() {
     [report],
   );
 
+  const loadCatalog = useCallback(
+    async (refresh: boolean): Promise<NativeCatalog | null> => {
+      try {
+        const next = await api.getNativeCatalog(refresh);
+        setCatalog(next);
+        return next;
+      } catch (cause) {
+        report(cause);
+        return null;
+      }
+    },
+    [report],
+  );
+
   useEffect(() => {
     void (async () => {
       try {
@@ -134,9 +151,10 @@ export default function App() {
       }
       await refreshStatus();
       await refreshProviders();
+      await loadCatalog(false);
       await loadModels(false);
     })();
-  }, [loadModels, refreshProfiles, refreshProviders, refreshStatus, report]);
+  }, [loadCatalog, loadModels, refreshProfiles, refreshProviders, refreshStatus, report]);
 
   useEffect(() => {
     const tick = (): void => {
@@ -444,7 +462,9 @@ export default function App() {
             models={models}
             providers={providers}
             omoAvailable={status?.omoAvailable ?? true}
-            onRefreshModels={() => void loadModels(true)}
+            catalog={catalog}
+            onRefreshModels={() => loadModels(true)}
+            onFetchCatalog={() => loadCatalog(true)}
             onConfigureProvider={configureProvider}
             onSave={(input: ProfileInput) =>
               void run(async () => {

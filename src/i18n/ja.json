@@ -93,7 +93,15 @@
     "legacyKeyBadge": "旧名称",
     "legacyKeyHint": "「{{key}}」は旧名称です。正式なキーは「{{target}}」です。",
     "saved": "プロファイルを保存しました",
-    "emptySelection": "左の一覧からプロファイルを選択してください"
+    "emptySelection": "左の一覧からプロファイルを選択してください",
+    "fetchCatalog": "最新のエージェント定義を取得",
+    "fetchingCatalog": "取得中…",
+    "catalogSource": "定義: {{source}}",
+    "catalogSourceInstalled": "omo {{version}}",
+    "catalogSourceCache": "omo {{version}}（キャッシュ）",
+    "catalogSourceBuiltin": "内蔵",
+    "catalogVersionUnknown": "バージョン不明",
+    "catalogFetched": "{{source}} から取得: エージェント {{agents}} / カテゴリ {{categories}}（{{added}} 行追加）"
   },
   "modelPicker": {
     "title": "モデルを選択",
@@ -101,6 +109,9 @@
     "freeText": "自由入力",
     "freeTextHint": "provider/model 形式で入力します",
     "refresh": "一覧を再取得",
+    "refreshing": "取得中…",
+    "count": "{{count}} 件 / 全 {{total}} 件",
+    "truncated": "{{total}} 件中 {{shown}} 件を表示 — 入力して絞り込み",
     "cached": "キャッシュを表示しています",
     "omoMissingHint": "omo コマンドが見つかりません。キャッシュまたは自由入力を利用してください。",
     "empty": "一致するモデルがありません",
