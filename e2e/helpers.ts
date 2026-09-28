@@ -2,9 +2,25 @@ import { expect, type Locator, type Page } from "@playwright/test";
 
 export const CONFIG_PATH = "C:\\Users\\tom\\.omo\\omo.jsonc";
 
+export interface MockProbe {
+  reachable: boolean;
+  status: number | null;
+  latencyMs: number;
+  tier: "fast" | "ok" | "slow";
+  errorKind: string | null;
+}
+
+export interface MockFetchedModels {
+  source: string;
+  ids: string[];
+}
+
 interface MockControls {
   setDrift: (drifted: boolean) => void;
   setOmoMissing: (missing: boolean) => void;
+  setProviderProbe: (id: string, result: MockProbe | "fail") => void;
+  setProviderFetch: (id: string, result: MockFetchedModels | "fail") => void;
+  setKeyPresent: (id: string, present: boolean) => void;
 }
 
 type MockWindow = { __omoswitchMock?: MockControls };
@@ -44,4 +60,70 @@ export async function setOmoMissing(page: Page, missing: boolean): Promise<void>
 
 export function acceptConfirm(page: Page): void {
   page.once("dialog", (dialog) => void dialog.accept());
+}
+
+export function dismissConfirm(page: Page): void {
+  page.once("dialog", (dialog) => void dialog.dismiss());
+}
+
+export async function openProvidersView(page: Page): Promise<void> {
+  await page.getByRole("tab", { name: /^プロバイダ/ }).click();
+  await expect(page.getByRole("tabpanel", { name: /^プロバイダ/ })).toBeVisible();
+}
+
+export async function openProfilesView(page: Page): Promise<void> {
+  await page.getByRole("tab", { name: "プロファイル" }).click();
+  await expect(page.getByRole("tabpanel", { name: "プロファイル" })).toBeVisible();
+}
+
+export function providerRow(page: Page, id: string): Locator {
+  return page.getByTestId(`provider-row-${id}`);
+}
+
+export function providerDialog(page: Page, mode: "add" | "edit"): Locator {
+  return page.getByRole("dialog", {
+    name: mode === "add" ? "プロバイダを追加" : "プロバイダを編集",
+  });
+}
+
+export async function editProvider(page: Page, id: string): Promise<Locator> {
+  await providerRow(page, id).getByRole("button", { name: "編集", exact: true }).click();
+  const dialog = providerDialog(page, "edit");
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+export async function setProviderProbe(
+  page: Page,
+  id: string,
+  result: MockProbe | "fail",
+): Promise<void> {
+  await page.evaluate(
+    ([providerId, value]) => {
+      (globalThis as MockWindow).__omoswitchMock?.setProviderProbe(providerId, value);
+    },
+    [id, result] as const,
+  );
+}
+
+export async function setProviderFetch(
+  page: Page,
+  id: string,
+  result: MockFetchedModels | "fail",
+): Promise<void> {
+  await page.evaluate(
+    ([providerId, value]) => {
+      (globalThis as MockWindow).__omoswitchMock?.setProviderFetch(providerId, value);
+    },
+    [id, result] as const,
+  );
+}
+
+export async function setKeyPresent(page: Page, id: string, present: boolean): Promise<void> {
+  await page.evaluate(
+    ([providerId, value]) => {
+      (globalThis as MockWindow).__omoswitchMock?.setKeyPresent(providerId, value);
+    },
+    [id, present] as const,
+  );
 }
